@@ -5,6 +5,8 @@ import datetime
 import telegram
 import logging
 import asyncio
+import threading # NEW: Import the threading library
+import time
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,7 +20,7 @@ db = SQLAlchemy(app)
 # --- Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
 
-# --- NEW: Helper function to run async code robustly ---
+# --- Helper function to run async code robustly ---
 def run_async(coroutine):
     """Creates a new event loop to run an async function, ensuring it's always clean."""
     try:
@@ -58,8 +60,8 @@ class Order(db.Model):
         return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
 
 # --- Telegram Bot Functions (Async) ---
-async def setup_bot(bot_token):
-    """Initializes a bot and sets its webhook asynchronously."""
+async def setup_bot_webhook(bot_token):
+    """Sets a webhook for a single bot."""
     logging.info(f"--- Setting up webhook for token: {bot_token[:10]}... ---")
     if not bot_token:
         logging.error("--- ERROR: bot_token is empty or None ---")
@@ -71,19 +73,18 @@ async def setup_bot(bot_token):
         await bot.set_webhook(webhook_url)
         logging.info(f"--- SUCCESS: Webhook set successfully for {bot_token[:10]}... ---")
     except Exception as e:
-        logging.error(f"--- ERROR: Failed to set webhook. Reason: {e} ---")
+        logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
     """Handles an incoming message from Telegram asynchronously."""
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
-    bot = telegram.Bot(token=bot_token) # Create a fresh bot instance for every message
+    bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
     if not update.message or not update.message.text: return
 
     chat_id = update.message.chat_id
     message_text = update.message.text
     
-    # We need an app context to access the database from this async function
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
     
@@ -137,7 +138,7 @@ def create_bot():
     db.session.commit()
     logging.info("--- D. Bot saved to database successfully. ---")
     
-    run_async(setup_bot(bot_token))
+    run_async(setup_bot_webhook(bot_token))
     
     return jsonify(new_bot.to_dict()), 201
 
@@ -197,3 +198,21 @@ def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
+
+# --- NEW: Background task to set up all bots on startup ---
+def initial_bot_setup():
+    """Gets all bots from the DB and sets their webhooks."""
+    with app.app_context():
+        logging.info("--- Starting initial bot setup... ---")
+        bots = Bot.query.all()
+        if not bots:
+            logging.info("--- No bots found in DB to set up. ---")
+            return
+        
+        for bot in bots:
+            run_async(setup_bot_webhook(bot.token))
+        logging.info("--- Initial bot setup complete. ---")
+
+# Start the setup in a background thread after the app initializes.
+# This ensures it doesn't block the server from starting.
+threading.Thread(target=initial_bot_setup, daemon=True).start()
