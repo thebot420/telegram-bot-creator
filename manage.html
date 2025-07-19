@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Bot - Bot Creator</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="dashboard-body">
+
+    <header class="dashboard-header">
+        <div class="header-logo">
+            <h1>Bot Creator</h1>
+        </div>
+        <div class="header-user">
+            <a href="/dashboard.html" class="header-link">← Back to Dashboard</a>
+            <button id="logout-button">Logout</button>
+        </div>
+    </header>
+
+    <main class="dashboard-main">
+        <div class="dashboard-content">
+            <h2 id="manage-bot-title">Manage Bot</h2>
+
+            <div class="page-actions">
+                <a href="#" id="view-orders-link" class="btn-secondary">View Orders</a>
+            </div>
+
+            <div class="content-section">
+                <h3>Add New Product</h3>
+                <form id="add-product-form">
+                    <div class="input-group">
+                        <label for="product-name">Product Name</label>
+                        <input type="text" id="product-name" required placeholder="e.g., Cool T-Shirt">
+                    </div>
+                    <div class="input-group">
+                        <label for="product-price">Price (in your chosen crypto)</label>
+                        <input type="number" step="any" id="product-price" required placeholder="e.g., 0.005">
+                    </div>
+                    <button type="submit" class="btn-primary">Add Product</button>
+                </form>
+            </div>
+
+            <div class="content-section">
+                <h3>Your Products</h3>
+                <div id="product-list">
+                    <p id="no-products-message">No products added yet.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script src="/manage.js"></script>
+</body>
+</html>
