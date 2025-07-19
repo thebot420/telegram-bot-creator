@@ -403,3 +403,27 @@ button:active {
     font-size: 0.8rem;
     color: #a0b0b9;
 }
+
+
+/* --- Bot Card Action Styles --- */
+
+.bot-actions {
+    display: flex;
+    gap: 0.5rem; /* Space between buttons */
+}
+
+.delete-btn {
+    background-color: transparent;
+    border: 1px solid #ff6b6b; /* Red border */
+    color: #ff6b6b; /* Red text */
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.delete-btn:hover {
+    background-color: #ff6b6b;
+    color: #ffffff;
+}
