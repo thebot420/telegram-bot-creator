@@ -16,18 +16,18 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- Telegram Bot Setup ---
-telegram_bots = {}
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
 
-# --- NEW: Helper function to run async code from our sync Flask routes ---
+# --- NEW: Helper function to run async code robustly ---
 def run_async(coroutine):
-    """Creates a new event loop to run an async function."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Creates a new event loop to run an async function, ensuring it's always clean."""
     try:
-        return loop.run_until_complete(coroutine)
-    finally:
-        loop.close()
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(coroutine)
 
 # --- Database Models ---
 # (These classes remain the same)
@@ -59,43 +59,44 @@ class Order(db.Model):
 
 # --- Telegram Bot Functions (Async) ---
 async def setup_bot(bot_token):
-    logging.info("--- 1. ENTERED async setup_bot function ---")
+    """Initializes a bot and sets its webhook asynchronously."""
+    logging.info(f"--- Setting up webhook for token: {bot_token[:10]}... ---")
     if not bot_token:
         logging.error("--- ERROR: bot_token is empty or None ---")
         return
-
-    if bot_token not in telegram_bots:
-        logging.info(f"--- 2. Initializing bot with token: {bot_token[:10]}... ---")
-        bot = telegram.Bot(token=bot_token)
-        webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
-        logging.info(f"--- 3. Webhook URL to be set: {webhook_url} ---")
-        try:
-            await bot.set_webhook(webhook_url)
-            telegram_bots[bot_token] = bot
-            logging.info(f"--- 4. SUCCESS: Webhook set successfully ---")
-        except Exception as e:
-            logging.error(f"--- 4. ERROR: Failed to set webhook. Reason: {e} ---")
+    
+    bot = telegram.Bot(token=bot_token)
+    webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
+    try:
+        await bot.set_webhook(webhook_url)
+        logging.info(f"--- SUCCESS: Webhook set successfully for {bot_token[:10]}... ---")
+    except Exception as e:
+        logging.error(f"--- ERROR: Failed to set webhook. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
-    if bot_token not in telegram_bots:
-        await setup_bot(bot_token)
-        if bot_token not in telegram_bots: return
-
-    update = telegram.Update.de_json(update_data, telegram_bots[bot_token])
+    """Handles an incoming message from Telegram asynchronously."""
+    logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
+    bot = telegram.Bot(token=bot_token) # Create a fresh bot instance for every message
+    update = telegram.Update.de_json(update_data, bot)
     if not update.message or not update.message.text: return
 
     chat_id = update.message.chat_id
     message_text = update.message.text
     
-    bot_data = Bot.query.filter_by(token=bot_token).first()
-    if not bot_data: return
+    # We need an app context to access the database from this async function
+    with app.app_context():
+        bot_data = Bot.query.filter_by(token=bot_token).first()
+    
+    if not bot_data: 
+        logging.warning(f"--- Bot data not found in DB for token {bot_token[:10]}... ---")
+        return
 
     if message_text.startswith('/buy'):
         try:
             product_name = message_text.split(' ', 1)[1]
             product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
             if product_to_buy:
-                with app.app_context(): # Needed to work with the db inside an async function
+                with app.app_context():
                     new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
                     db.session.add(new_order)
                     db.session.commit()
@@ -111,7 +112,8 @@ async def handle_telegram_update(bot_token, update_data):
             product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
             reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
         
-    await telegram_bots[bot_token].send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+    logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -126,10 +128,8 @@ def create_bot():
     logging.info("\n--- A. ENTERED create_bot endpoint ---")
     data = request.get_json()
     bot_token = data.get('bot_token')
-    logging.info(f"--- B. Received token from frontend: {bot_token[:10]}... ---")
     
     if Bot.query.filter_by(token=bot_token).first():
-        logging.warning("--- C. Bot with this token already exists. Aborting. ---")
         return jsonify({'message': 'A bot with this token already exists.'}), 409
 
     new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'))
@@ -137,16 +137,12 @@ def create_bot():
     db.session.commit()
     logging.info("--- D. Bot saved to database successfully. ---")
     
-    logging.info("--- E. Calling setup_bot function... ---")
-    # NEW: Use our helper function to run the async code
     run_async(setup_bot(bot_token))
-    logging.info("--- F. Returned from setup_bot function. ---")
     
     return jsonify(new_bot.to_dict()), 201
 
 @app.route('/webhook/<bot_token>', methods=['POST'])
 def telegram_webhook(bot_token):
-    # NEW: Use our helper function to run the async code
     run_async(handle_telegram_update(bot_token, request.get_json()))
     return "ok", 200
 
