@@ -201,9 +201,13 @@ def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 def serve_admin_login_page():
     return send_from_directory('.', 'admin.html')
 
+# Replace the old placeholder function with this one
 @app.route('/admin/dashboard')
 def serve_admin_dashboard():
-    return "<h1>Welcome, Admin!</h1><p>User management dashboard coming soon.</p>"
+    """Serves the main admin dashboard page."""
+    # Note: We will add security later to ensure only logged-in admins can see this.
+    return send_from_directory('.', 'admin_dashboard.html')
+
 
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
