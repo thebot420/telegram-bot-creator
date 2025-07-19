@@ -57,11 +57,8 @@ class Order(db.Model):
 
 # --- Telegram Bot Functions (Async) ---
 async def setup_bot_webhook(bot_token):
-    logging.info(f"--- Setting up webhook for token: {bot_token[:10]}... ---")
-    if not bot_token:
-        logging.error("--- ERROR: bot_token is empty or None ---")
-        return
-    
+    # ... (This function remains the same)
+    logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
     try:
@@ -71,6 +68,7 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
+    # ... (This function remains the same)
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
@@ -79,68 +77,73 @@ async def handle_telegram_update(bot_token, update_data):
     chat_id = update.message.chat_id
     message_text = update.message.text
     
-    # --- THIS IS THE CRITICAL FIX ---
-    # We now keep the app_context open for the entire function
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        
-        if not bot_data: 
-            logging.warning(f"--- Bot data not found in DB for token {bot_token[:10]}... ---")
-            return
+    
+    if not bot_data: 
+        logging.warning(f"--- Bot data not found in DB for token {bot_token[:10]}... ---")
+        return
 
-        if message_text.startswith('/buy'):
-            try:
-                product_name = message_text.split(' ', 1)[1]
-                # Now this line will work because the session is still open
-                product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
-                if product_to_buy:
+    if message_text.startswith('/buy'):
+        try:
+            product_name = message_text.split(' ', 1)[1]
+            product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
+            if product_to_buy:
+                with app.app_context():
                     new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
                     db.session.add(new_order)
                     db.session.commit()
-                    reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
-                else:
-                    reply_text = f"Sorry, the product '{product_name}' was not found."
-            except IndexError:
-                reply_text = "To buy a product, please use the format: /buy <Product Name>"
-        else:
-            # This line will also now work correctly
-            if not bot_data.products:
-                reply_text = "This shop has no products yet."
+                reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
             else:
-                product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
-                reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
-            
-        await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
-        logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
+                reply_text = f"Sorry, the product '{product_name}' was not found."
+        except IndexError:
+            reply_text = "To buy a product, please use the format: /buy <Product Name>"
+    else:
+        if not bot_data.products:
+            reply_text = "This shop has no products yet."
+        else:
+            product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
+            reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
+        
+    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+    logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
 def login():
+    # ... (This function remains the same)
     data = request.get_json()
     if data.get('email') == 'user@example.com' and data.get('password') == 'password123':
         return jsonify({'message': 'Login successful!'}), 200
     return jsonify({'message': 'Invalid email or password'}), 401
 
+# --- NEW: Admin Login API Route ---
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    data = request.get_json()
+    ADMIN_EMAIL = "admin@example.com"
+    ADMIN_PASSWORD = "supersecretpassword123"
+    if data.get('email') == ADMIN_EMAIL and data.get('password') == ADMIN_PASSWORD:
+        return jsonify({'message': 'Admin login successful!'}), 200
+    return jsonify({'message': 'Invalid admin credentials'}), 401
+
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
+    # ... (This function remains the same)
     logging.info("\n--- A. ENTERED create_bot endpoint ---")
     data = request.get_json()
     bot_token = data.get('bot_token')
-    
     if Bot.query.filter_by(token=bot_token).first():
         return jsonify({'message': 'A bot with this token already exists.'}), 409
-
     new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'))
     db.session.add(new_bot)
     db.session.commit()
-    logging.info("--- D. Bot saved to database successfully. ---")
-    
     run_async(setup_bot_webhook(bot_token))
-    
     return jsonify(new_bot.to_dict()), 201
 
 @app.route('/webhook/<bot_token>', methods=['POST'])
 def telegram_webhook(bot_token):
+    # ... (This function remains the same)
     run_async(handle_telegram_update(bot_token, request.get_json()))
     return "ok", 200
 
@@ -192,6 +195,15 @@ def serve_manage_page(bot_id): return send_from_directory('.', 'manage.html')
 
 @app.route('/orders/<bot_id>')
 def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
+
+# --- NEW: Admin Page Routes ---
+@app.route('/admin')
+def serve_admin_login_page():
+    return send_from_directory('.', 'admin.html')
+
+@app.route('/admin/dashboard')
+def serve_admin_dashboard():
+    return "<h1>Welcome, Admin!</h1><p>User management dashboard coming soon.</p>"
 
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
