@@ -2,28 +2,39 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 import uuid
 import datetime
+import telegram # The Telegram library
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
+# This configures the database. On Render, this will create a file named 'bots.db'.
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bots.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# --- Telegram Bot Setup ---
+# This dictionary will hold the bot instances while the server is running.
+telegram_bots = {}
+# This is your live server URL from Render.
+SERVER_URL = "https://telegram-bot-creator.onrender.com"
+
 # --- Database Models ---
+# These classes define the structure of our database tables.
 class Bot(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    token = db.Column(db.String(100), nullable=False)
+    token = db.Column(db.String(100), unique=True, nullable=False)
     wallet = db.Column(db.String(100), nullable=False)
     products = db.relationship('Product', backref='bot', lazy=True, cascade="all, delete-orphan")
     orders = db.relationship('Order', backref='bot', lazy=True, cascade="all, delete-orphan")
-    def to_dict(self): return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'products': [p.to_dict() for p in self.products], 'orders': [o.to_dict() for o in self.orders]}
+    def to_dict(self):
+        return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'products': [p.to_dict() for p in self.products], 'orders': [o.to_dict() for o in self.orders]}
 
 class Product(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'name': self.name, 'price': self.price}
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name, 'price': self.price}
 
 class Order(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -31,7 +42,62 @@ class Order(db.Model):
     price = db.Column(db.Float, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
+    def to_dict(self):
+        return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
+
+# --- Telegram Bot Functions ---
+def setup_bot(bot_token):
+    """Initializes a bot and tells Telegram where to send messages (sets the webhook)."""
+    if bot_token not in telegram_bots:
+        bot = telegram.Bot(token=bot_token)
+        webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
+        try:
+            bot.set_webhook(webhook_url)
+            telegram_bots[bot_token] = bot
+            print(f"SUCCESS: Webhook set for bot token {bot_token[:10]}...")
+        except Exception as e:
+            print(f"ERROR: Failed to set webhook for {bot_token[:10]}...: {e}")
+
+def handle_telegram_update(bot_token, update_data):
+    """Handles an incoming message from Telegram."""
+    if bot_token not in telegram_bots:
+        setup_bot(bot_token)
+        if bot_token not in telegram_bots:
+            print(f"ERROR: Could not setup bot for incoming message.")
+            return
+
+    update = telegram.Update.de_json(update_data, telegram_bots[bot_token])
+    if not update.message or not update.message.text:
+        return
+
+    chat_id = update.message.chat_id
+    message_text = update.message.text
+    
+    bot_data = Bot.query.filter_by(token=bot_token).first()
+    if not bot_data: return
+
+    if message_text.startswith('/buy'):
+        try:
+            product_name = message_text.split(' ', 1)[1]
+            product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
+
+            if product_to_buy:
+                new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
+                db.session.add(new_order)
+                db.session.commit()
+                reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
+            else:
+                reply_text = f"Sorry, the product '{product_name}' was not found."
+        except IndexError:
+            reply_text = "To buy a product, please use the format: /buy <Product Name>"
+    else: # Default behavior for /start or any other message
+        if not bot_data.products:
+            reply_text = "This shop has no products yet."
+        else:
+            product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
+            reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
+        
+    telegram_bots[bot_token].send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -41,18 +107,31 @@ def login():
         return jsonify({'message': 'Login successful!'}), 200
     return jsonify({'message': 'Invalid email or password'}), 401
 
+@app.route('/api/bots', methods=['POST'])
+def create_bot():
+    data = request.get_json()
+    bot_token = data.get('bot_token')
+    
+    # Check if a bot with this token already exists
+    if Bot.query.filter_by(token=bot_token).first():
+        return jsonify({'message': 'A bot with this token already exists.'}), 409
+
+    new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'))
+    db.session.add(new_bot)
+    db.session.commit()
+    setup_bot(bot_token)
+    return jsonify(new_bot.to_dict()), 201
+
+@app.route('/webhook/<bot_token>', methods=['POST'])
+def telegram_webhook(bot_token):
+    handle_telegram_update(bot_token, request.get_json())
+    return "ok", 200
+
+# (All other API and Page routes remain the same)
 @app.route('/api/bots', methods=['GET'])
 def get_bots():
     bots = Bot.query.all()
     return jsonify([b.to_dict() for b in bots])
-
-@app.route('/api/bots', methods=['POST'])
-def create_bot():
-    data = request.get_json()
-    new_bot = Bot(token=data.get('bot_token'), wallet=data.get('wallet_address'))
-    db.session.add(new_bot)
-    db.session.commit()
-    return jsonify(new_bot.to_dict()), 201
 
 @app.route('/api/bots/<bot_id>', methods=['GET'])
 def get_bot_details(bot_id):
@@ -69,7 +148,7 @@ def add_product_to_bot(bot_id):
     db.session.add(new_product)
     db.session.commit()
     return jsonify(new_product.to_dict()), 201
-
+    
 @app.route('/api/bots/<bot_id>/orders', methods=['GET'])
 def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
@@ -87,7 +166,3 @@ def serve_manage_page(bot_id): return send_from_directory('.', 'manage.html')
 def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
-
-# --- This block is needed to run the server locally ---
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
