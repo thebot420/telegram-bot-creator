@@ -166,3 +166,16 @@ def serve_manage_page(bot_id): return send_from_directory('.', 'manage.html')
 def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
+
+
+# Add this new function to the API ROUTES section in app.py
+@app.route('/api/bots/<bot_id>', methods=['DELETE'])
+def delete_bot(bot_id):
+    """Deletes a bot from the database."""
+    bot = db.session.get(Bot, bot_id)
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+    
+    db.session.delete(bot)
+    db.session.commit()
+    return jsonify({'message': 'Bot deleted successfully'}), 200
