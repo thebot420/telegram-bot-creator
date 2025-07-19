@@ -5,14 +5,12 @@ import datetime
 import telegram
 import logging
 import asyncio
-import threading
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_5ai1_user:ld3aEwGF0zjuO0EsDiMk7gQ8uWnyrT0E@dpg-d1tsf4idbo4c73dv27pg-a/bot_database_5ai1'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -194,18 +192,3 @@ def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
-
-# --- Background task to set up all bots on startup ---
-def initial_bot_setup():
-    with app.app_context():
-        logging.info("--- Starting initial bot setup... ---")
-        bots = Bot.query.all()
-        if not bots:
-            logging.info("--- No bots found in DB to set up. ---")
-            return
-        
-        for bot in bots:
-            run_async(setup_bot_webhook(bot.token))
-        logging.info("--- Initial bot setup complete. ---")
-
-threading.Thread(target=initial_bot_setup, daemon=True).start()
