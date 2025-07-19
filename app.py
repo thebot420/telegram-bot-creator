@@ -3,10 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 import uuid
 import datetime
 import telegram
-import logging # NEW: Import the logging module
+import logging
 
 # --- Logging Configuration ---
-# This sets up a logger that will show up in Render's logs.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
@@ -48,22 +47,17 @@ class Order(db.Model):
 
 # --- Telegram Bot Functions ---
 def setup_bot(bot_token):
-    logging.info("--- 1. ENTERED setup_bot function ---")
-    if not bot_token:
-        logging.error("--- ERROR: bot_token is empty or None ---")
-        return
-
+    # ... (This function remains the same)
+    logging.info(f"Setting up bot with token {bot_token[:10]}...")
     if bot_token not in telegram_bots:
-        logging.info(f"--- 2. Initializing bot with token: {bot_token[:10]}... ---")
         bot = telegram.Bot(token=bot_token)
         webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
-        logging.info(f"--- 3. Webhook URL to be set: {webhook_url} ---")
         try:
             bot.set_webhook(webhook_url)
             telegram_bots[bot_token] = bot
-            logging.info(f"--- 4. SUCCESS: Webhook set successfully ---")
+            logging.info(f"SUCCESS: Webhook set for bot token {bot_token[:10]}...")
         except Exception as e:
-            logging.error(f"--- 4. ERROR: Failed to set webhook. Reason: {e} ---")
+            logging.error(f"ERROR: Failed to set webhook for {bot_token[:10]}...: {e}")
 
 def handle_telegram_update(bot_token, update_data):
     # ... (This function remains the same)
@@ -113,25 +107,32 @@ def login():
 
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
-    logging.info("\n--- A. ENTERED create_bot endpoint ---")
+    # ... (This function remains the same)
+    logging.info("Creating a new bot...")
     data = request.get_json()
     bot_token = data.get('bot_token')
-    logging.info(f"--- B. Received token from frontend: {bot_token[:10]}... ---")
-    
     if Bot.query.filter_by(token=bot_token).first():
-        logging.warning("--- C. Bot with this token already exists. Aborting. ---")
         return jsonify({'message': 'A bot with this token already exists.'}), 409
-
     new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'))
     db.session.add(new_bot)
     db.session.commit()
-    logging.info("--- D. Bot saved to database successfully. ---")
-    
-    logging.info("--- E. Calling setup_bot function... ---")
     setup_bot(bot_token)
-    logging.info("--- F. Returned from setup_bot function. ---")
-    
     return jsonify(new_bot.to_dict()), 201
+
+# --- NEW: This is the function that was missing ---
+@app.route('/api/bots/<bot_id>', methods=['DELETE'])
+def delete_bot(bot_id):
+    """Deletes a bot from the database."""
+    logging.info(f"Attempting to delete bot with ID: {bot_id}")
+    bot = db.session.get(Bot, bot_id)
+    if not bot:
+        logging.error(f"Bot with ID {bot_id} not found for deletion.")
+        return jsonify({'message': 'Bot not found'}), 404
+    
+    db.session.delete(bot)
+    db.session.commit()
+    logging.info(f"Successfully deleted bot with ID: {bot_id}")
+    return jsonify({'message': 'Bot deleted successfully'}), 200
 
 @app.route('/webhook/<bot_token>', methods=['POST'])
 def telegram_webhook(bot_token):
