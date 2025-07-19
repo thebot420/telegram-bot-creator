@@ -5,15 +5,15 @@ import datetime
 import telegram
 import logging
 import asyncio
-import threading # NEW: Import the threading library
-import time
+import threading
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///bots.db'
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_5ai1_user:ld3aEwGF0zjuO0EsDiMk7gQ8uWnyrT0E@dpg-d1tsf4idbo4c73dv27pg-a/bot_database_5ai1'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -22,7 +22,6 @@ SERVER_URL = "https://telegram-bot-creator.onrender.com"
 
 # --- Helper function to run async code robustly ---
 def run_async(coroutine):
-    """Creates a new event loop to run an async function, ensuring it's always clean."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -32,7 +31,6 @@ def run_async(coroutine):
     return loop.run_until_complete(coroutine)
 
 # --- Database Models ---
-# (These classes remain the same)
 class Bot(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     token = db.Column(db.String(100), unique=True, nullable=False)
@@ -61,7 +59,6 @@ class Order(db.Model):
 
 # --- Telegram Bot Functions (Async) ---
 async def setup_bot_webhook(bot_token):
-    """Sets a webhook for a single bot."""
     logging.info(f"--- Setting up webhook for token: {bot_token[:10]}... ---")
     if not bot_token:
         logging.error("--- ERROR: bot_token is empty or None ---")
@@ -76,7 +73,6 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
-    """Handles an incoming message from Telegram asynchronously."""
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
@@ -199,9 +195,8 @@ def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
 
-# --- NEW: Background task to set up all bots on startup ---
+# --- Background task to set up all bots on startup ---
 def initial_bot_setup():
-    """Gets all bots from the DB and sets their webhooks."""
     with app.app_context():
         logging.info("--- Starting initial bot setup... ---")
         bots = Bot.query.all()
@@ -213,6 +208,4 @@ def initial_bot_setup():
             run_async(setup_bot_webhook(bot.token))
         logging.info("--- Initial bot setup complete. ---")
 
-# Start the setup in a background thread after the app initializes.
-# This ensures it doesn't block the server from starting.
 threading.Thread(target=initial_bot_setup, daemon=True).start()
