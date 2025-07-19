@@ -4,7 +4,7 @@ import uuid
 import datetime
 import telegram
 import logging
-import asyncio # NEW: Import the asyncio library
+import asyncio
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,6 +18,16 @@ db = SQLAlchemy(app)
 # --- Telegram Bot Setup ---
 telegram_bots = {}
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
+
+# --- NEW: Helper function to run async code from our sync Flask routes ---
+def run_async(coroutine):
+    """Creates a new event loop to run an async function."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
 
 # --- Database Models ---
 # (These classes remain the same)
@@ -47,9 +57,8 @@ class Order(db.Model):
     def to_dict(self):
         return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
 
-# --- Telegram Bot Functions (Now Async) ---
+# --- Telegram Bot Functions (Async) ---
 async def setup_bot(bot_token):
-    """Initializes a bot and sets its webhook asynchronously."""
     logging.info("--- 1. ENTERED async setup_bot function ---")
     if not bot_token:
         logging.error("--- ERROR: bot_token is empty or None ---")
@@ -61,7 +70,6 @@ async def setup_bot(bot_token):
         webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
         logging.info(f"--- 3. Webhook URL to be set: {webhook_url} ---")
         try:
-            # NEW: Use 'await' for the async function
             await bot.set_webhook(webhook_url)
             telegram_bots[bot_token] = bot
             logging.info(f"--- 4. SUCCESS: Webhook set successfully ---")
@@ -69,7 +77,6 @@ async def setup_bot(bot_token):
             logging.error(f"--- 4. ERROR: Failed to set webhook. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
-    """Handles an incoming message from Telegram asynchronously."""
     if bot_token not in telegram_bots:
         await setup_bot(bot_token)
         if bot_token not in telegram_bots: return
@@ -88,9 +95,10 @@ async def handle_telegram_update(bot_token, update_data):
             product_name = message_text.split(' ', 1)[1]
             product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
             if product_to_buy:
-                new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
-                db.session.add(new_order)
-                db.session.commit()
+                with app.app_context(): # Needed to work with the db inside an async function
+                    new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
+                    db.session.add(new_order)
+                    db.session.commit()
                 reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
             else:
                 reply_text = f"Sorry, the product '{product_name}' was not found."
@@ -102,8 +110,7 @@ async def handle_telegram_update(bot_token, update_data):
         else:
             product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
             reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
-    
-    # NEW: Use 'await' for the async function
+        
     await telegram_bots[bot_token].send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
 
 # --- API ROUTES ---
@@ -131,16 +138,16 @@ def create_bot():
     logging.info("--- D. Bot saved to database successfully. ---")
     
     logging.info("--- E. Calling setup_bot function... ---")
-    # NEW: Use asyncio.run() to call the async function from our sync code
-    asyncio.run(setup_bot(bot_token))
+    # NEW: Use our helper function to run the async code
+    run_async(setup_bot(bot_token))
     logging.info("--- F. Returned from setup_bot function. ---")
     
     return jsonify(new_bot.to_dict()), 201
 
 @app.route('/webhook/<bot_token>', methods=['POST'])
 def telegram_webhook(bot_token):
-    # NEW: Use asyncio.run() to call the async function from our sync code
-    asyncio.run(handle_telegram_update(bot_token, request.get_json()))
+    # NEW: Use our helper function to run the async code
+    run_async(handle_telegram_update(bot_token, request.get_json()))
     return "ok", 200
 
 # (All other routes remain the same)
