@@ -79,36 +79,39 @@ async def handle_telegram_update(bot_token, update_data):
     chat_id = update.message.chat_id
     message_text = update.message.text
     
+    # --- THIS IS THE CRITICAL FIX ---
+    # We now keep the app_context open for the entire function
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-    
-    if not bot_data: 
-        logging.warning(f"--- Bot data not found in DB for token {bot_token[:10]}... ---")
-        return
+        
+        if not bot_data: 
+            logging.warning(f"--- Bot data not found in DB for token {bot_token[:10]}... ---")
+            return
 
-    if message_text.startswith('/buy'):
-        try:
-            product_name = message_text.split(' ', 1)[1]
-            product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
-            if product_to_buy:
-                with app.app_context():
+        if message_text.startswith('/buy'):
+            try:
+                product_name = message_text.split(' ', 1)[1]
+                # Now this line will work because the session is still open
+                product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
+                if product_to_buy:
                     new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
                     db.session.add(new_order)
                     db.session.commit()
-                reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
-            else:
-                reply_text = f"Sorry, the product '{product_name}' was not found."
-        except IndexError:
-            reply_text = "To buy a product, please use the format: /buy <Product Name>"
-    else:
-        if not bot_data.products:
-            reply_text = "This shop has no products yet."
+                    reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
+                else:
+                    reply_text = f"Sorry, the product '{product_name}' was not found."
+            except IndexError:
+                reply_text = "To buy a product, please use the format: /buy <Product Name>"
         else:
-            product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
-            reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
-        
-    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
-    logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
+            # This line will also now work correctly
+            if not bot_data.products:
+                reply_text = "This shop has no products yet."
+            else:
+                product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
+                reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
+            
+        await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+        logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
