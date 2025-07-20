@@ -21,9 +21,11 @@
 
     <main class="dashboard-main">
         <div class="dashboard-content">
-            <h2 id="user-details-title">User Details</h2>
+            <div class="page-header">
+                <h2 id="user-details-title">User Details</h2>
+                <button id="edit-user-button" class="btn-primary">Edit User</button>
+            </div>
             
-            <!-- NEW: Section for User Status -->
             <div class="content-section user-status-section">
                 <h3>Account Status</h3>
                 <div class="status-control">
@@ -44,6 +46,37 @@
         </div>
     </main>
     
+    <!-- NEW: Edit User Modal -->
+    <div id="edit-user-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2>Edit User</h2>
+            
+            <!-- Form to update email -->
+            <form id="update-email-form">
+                <div class="input-group">
+                    <label for="edit-user-email">Update Email</label>
+                    <input type="email" id="edit-user-email" required>
+                </div>
+                <button type="submit" class="btn-primary">Save Email</button>
+            </form>
+
+            <hr class="form-divider">
+
+            <!-- Form to reset password -->
+            <form id="reset-password-form">
+                <div class="input-group">
+                    <label for="new-password">Reset Password</label>
+                    <input type="text" id="new-password" required placeholder="Enter new temporary password">
+                </div>
+                <button type="submit" class="btn-primary">Set New Password</button>
+            </form>
+
+            <div class="modal-actions">
+                <button type="button" id="close-edit-modal-button" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/admin_user_details.js"></script>
 </body>
 </html>
