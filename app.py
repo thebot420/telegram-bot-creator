@@ -18,8 +18,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_4xww_user:ZvtsS6mD0QRjPVKEH2w83fcBpeMonpnM@dpg-d1uifimmcj7s73eifvcg-a/bot_database_4xww'
+# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -79,7 +79,7 @@ class Order(db.Model):
     product_name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    status = db.Column(db.String(20), default='pending', nullable=False) # NEW: Order status
+    status = db.Column(db.String(20), default='pending', nullable=False)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
     def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat(), 'status': self.status}
 
@@ -122,19 +122,26 @@ async def handle_telegram_update(bot_token, update_data):
                         await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
                     else:
                         await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
+            
             elif action == 'buy_product':
                 product = db.session.get(Product, item_id)
                 if product:
-                    # Create a payment invoice via our API
+                    # Call our own API to create a payment invoice with NOWPayments
                     api_url = f"{SERVER_URL}/api/orders/{product.id}/create-payment"
-                    response = requests.post(api_url)
-                    if response.status_code == 201:
-                        payment_info = response.json()
-                        invoice_url = payment_info.get('invoice_url')
-                        reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
-                        await bot.send_message(chat_id=chat_id, text=reply_text)
-                    else:
-                        await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment. Please try again later.")
+                    try:
+                        response = requests.post(api_url)
+                        if response.status_code == 201:
+                            payment_info = response.json()
+                            invoice_url = payment_info.get('invoice_url')
+                            reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
+                            await bot.send_message(chat_id=chat_id, text=reply_text)
+                        else:
+                            logging.error(f"API call to create payment failed: {response.text}")
+                            await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment. Please try again later.")
+                    except Exception as e:
+                        logging.error(f"Exception during internal API call: {e}")
+                        await bot.send_message(chat_id=chat_id, text="A critical error occurred. Please contact support.")
+
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             if not bot_data.categories:
@@ -163,7 +170,6 @@ def admin_login():
         return jsonify({'message': 'Admin login successful!'}), 200
     return jsonify({'message': 'Invalid admin credentials'}), 401
 
-# (All Admin user routes are unchanged)
 @app.route('/api/admin/users', methods=['GET'])
 def get_users():
     users = User.query.all()
@@ -251,7 +257,19 @@ def get_dashboard_stats():
     stats = {'total_sales': round(total_sales, 2), 'commission_earned': round(commission_earned, 2), 'total_orders': total_orders, 'active_users': active_users, 'recent_orders': recent_orders}
     return jsonify(stats)
 
-# --- NEW: Payment Routes ---
+@app.route('/api/users/<user_id>/dashboard-stats', methods=['GET'])
+def get_user_dashboard_stats(user_id):
+    user = db.session.get(User, user_id)
+    if not user: return jsonify({'message': 'User not found'}), 404
+    bot_ids = [bot.id for bot in user.bots]
+    total_sales = db.session.query(db.func.sum(Order.price)).filter(Order.bot_id.in_(bot_ids)).scalar() or 0
+    total_orders = Order.query.filter(Order.bot_id.in_(bot_ids)).count()
+    recent_orders_query = Order.query.filter(Order.bot_id.in_(bot_ids)).order_by(Order.timestamp.desc()).limit(5).all()
+    recent_orders = [order.to_dict() for order in recent_orders_query]
+    stats = {'total_sales': round(total_sales, 2), 'total_orders': total_orders, 'recent_orders': recent_orders}
+    return jsonify(stats)
+
+# --- Payment Routes ---
 @app.route('/api/orders/<product_id>/create-payment', methods=['POST'])
 def create_payment(product_id):
     product = db.session.get(Product, product_id)
@@ -261,6 +279,10 @@ def create_payment(product_id):
     new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
     db.session.add(new_order)
     db.session.commit()
+
+    if not NOWPAYMENTS_API_KEY:
+        logging.error("NOWPayments API key is not set.")
+        return jsonify({'message': 'Payment processor is not configured.'}), 500
 
     headers = {'x-api-key': NOWPAYMENTS_API_KEY}
     payload = {
@@ -281,7 +303,8 @@ def create_payment(product_id):
 @app.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():
     signature = request.headers.get('x-nowpayments-sig')
-    if not signature: return "Signature missing", 400
+    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY:
+        return "Configuration error", 400
     try:
         sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
         expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
