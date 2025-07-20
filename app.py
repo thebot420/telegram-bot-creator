@@ -196,8 +196,27 @@ def add_product_to_bot(bot_id):
 @app.route('/api/bots/<bot_id>/orders', methods=['GET'])
 def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
+
+
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    """Deletes a user from the database."""
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'User deleted successfully'}), 200
+
+
+
+
+
+
+
+
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
