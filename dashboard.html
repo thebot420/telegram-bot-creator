@@ -20,42 +20,62 @@
 
     <main class="dashboard-main">
         <div class="dashboard-content">
-            <h2>Your Bots</h2>
-            <div id="bots-list-container">
-                <p class="no-bots-message">You haven't created any bots yet.</p>
+
+            <!-- NEW: User Sales Stats Section -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h4>Your Total Sales</h4>
+                    <p id="user-total-sales">Loading...</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Your Total Orders</h4>
+                    <p id="user-total-orders">Loading...</p>
+                </div>
             </div>
-            <button id="create-bot-button" class="btn-primary">+ Create New Bot</button>
+
+            <div class="content-section">
+                <h3>Your Recent Orders</h3>
+                <div id="user-recent-orders-list">
+                    <p id="user-no-recent-orders">You have no recent orders.</p>
+                </div>
+            </div>
+            <!-- END NEW SECTION -->
+
+            <!-- Existing Bot Management Section -->
+            <div class="content-section">
+                <div class="page-header">
+                    <h2>Your Bots</h2>
+                    <button id="create-bot-button" class="btn-primary">+ Create New Bot</button>
+                </div>
+                <div id="bots-list-container">
+                    <p class="no-bots-message">You haven't created any bots yet.</p>
+                </div>
+            </div>
+
         </div>
     </main>
 
-    <script src="dashboard.js"></script>
-
-
-
+    <!-- Your existing modal for creating a bot -->
     <div id="add-bot-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <h2>Create a New Bot</h2>
-        <form id="add-bot-form">
-            <div class="input-group">
-                <label for="bot-token">Telegram Bot Token</label>
-                <input type="password" id="bot-token" required placeholder="Paste your token from BotFather">
-            </div>
-            <div class="input-group">
-                <label for="wallet-address">Crypto Wallet Address</label>
-                <input type="text" id="wallet-address" required placeholder="Your public BTC, ETH, etc. address">
-            </div>
-            <div class="modal-actions">
-                <button type="button" id="cancel-button" class="btn-secondary">Cancel</button>
-                <button type="submit" class="btn-primary">Create Bot</button>
-            </div>
-        </form>
+        <div class="modal-content">
+            <h2>Create a New Bot</h2>
+            <form id="add-bot-form">
+                <div class="input-group">
+                    <label for="bot-token">Telegram Bot Token</label>
+                    <input type="password" id="bot-token" required placeholder="Paste your token from BotFather">
+                </div>
+                <div class="input-group">
+                    <label for="wallet-address">Crypto Wallet Address</label>
+                    <input type="text" id="wallet-address" required placeholder="Your public BTC, ETH, etc. address">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="cancel-button" class="btn-secondary">Cancel</button>
+                    <button type="submit" class="btn-primary">Create Bot</button>
+                </div>
+            </form>
+        </div>
     </div>
-</div>
 
-
-
-
-
-
+    <script src="dashboard.js"></script>
 </body>
 </html>

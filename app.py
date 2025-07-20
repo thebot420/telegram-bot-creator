@@ -135,6 +135,12 @@ async def handle_telegram_update(bot_token, update_data):
             await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
         logging.info(f"--- Successfully processed update for chat ID {chat_id} ---")
 
+
+
+
+
+
+
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -322,6 +328,39 @@ def get_dashboard_stats():
         'recent_orders': recent_orders
     }
     return jsonify(stats)
+
+@app.route('/api/users/<user_id>/dashboard-stats', methods=['GET'])
+def get_user_dashboard_stats(user_id):
+    """Calculates and returns key metrics for a specific user's dashboard."""
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    # Find all bot IDs owned by this user
+    bot_ids = [bot.id for bot in user.bots]
+
+    # Calculate total sales and orders only from this user's bots
+    total_sales = db.session.query(db.func.sum(Order.price)).filter(Order.bot_id.in_(bot_ids)).scalar() or 0
+    total_orders = Order.query.filter(Order.bot_id.in_(bot_ids)).count()
+
+    # Get the 5 most recent orders for this user
+    recent_orders_query = Order.query.filter(Order.bot_id.in_(bot_ids)).order_by(Order.timestamp.desc()).limit(5).all()
+    recent_orders = [order.to_dict() for order in recent_orders_query]
+    
+    stats = {
+        'total_sales': round(total_sales, 2),
+        'total_orders': total_orders,
+        'recent_orders': recent_orders
+    }
+    
+    return jsonify(stats)
+
+
+
+
+
+
+
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
