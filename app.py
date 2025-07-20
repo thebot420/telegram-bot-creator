@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash # For secure passwords
+from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import datetime
 import telegram
@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_chit_user:iTbAiEZAkUdeZxrM79hpj8DxdrHWVtQo@dpg-d1u36v7diees73abuh5g-a/bot_database_chit'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -29,22 +30,14 @@ def run_async(coroutine):
     return loop.run_until_complete(coroutine)
 
 # --- Database Models ---
-
-# --- NEW: User Model ---
 class User(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     bots = db.relationship('Bot', backref='owner', lazy=True, cascade="all, delete-orphan")
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-    
-    def to_dict(self):
-        return {'id': self.id, 'email': self.email, 'bots': [bot.to_dict_simple() for bot in self.bots]}
+    def set_password(self, password): self.password_hash = generate_password_hash(password)
+    def check_password(self, password): return check_password_hash(self.password_hash, password)
+    def to_dict(self): return {'id': self.id, 'email': self.email, 'bots': [bot.to_dict_simple() for bot in self.bots]}
 
 class Bot(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -52,15 +45,10 @@ class Bot(db.Model):
     wallet = db.Column(db.String(100), nullable=False)
     products = db.relationship('Product', backref='bot', lazy=True, cascade="all, delete-orphan")
     orders = db.relationship('Order', backref='bot', lazy=True, cascade="all, delete-orphan")
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False) # Link to the User table
-    
-    def to_dict(self):
-        return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'products': [p.to_dict() for p in self.products], 'orders': [o.to_dict() for o in self.orders]}
-    
-    def to_dict_simple(self): # A simpler version for the user list
-        return {'id': self.id, 'token_snippet': f"{self.token[:6]}..."}
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    def to_dict(self): return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'products': [p.to_dict() for p in self.products], 'orders': [o.to_dict() for o in self.orders]}
+    def to_dict_simple(self): return {'id': self.id, 'token_snippet': f"{self.token[:6]}..."}
 
-# (Product and Order models remain the same, but we need to add a user_id to Bot)
 class Product(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
@@ -77,9 +65,7 @@ class Order(db.Model):
     def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
 
 # --- Telegram Bot Functions (Async) ---
-# (These functions remain the same)
 async def setup_bot_webhook(bot_token):
-    # ...
     logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
@@ -90,7 +76,6 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
-    # ...
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
@@ -128,18 +113,14 @@ async def handle_telegram_update(bot_token, update_data):
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
 def login():
-    # --- MODIFIED: Now checks the database for users ---
     data = request.get_json()
     user = User.query.filter_by(email=data.get('email')).first()
     if user and user.check_password(data.get('password')):
-        # In a real app, we would create a session token here.
-        # For now, we just confirm success.
         return jsonify({'message': 'Login successful!', 'userId': user.id}), 200
     return jsonify({'message': 'Invalid email or password'}), 401
 
 @app.route('/api/admin/login', methods=['POST'])
 def admin_login():
-    # ... (This function remains the same)
     data = request.get_json()
     ADMIN_EMAIL = "admin@example.com"
     ADMIN_PASSWORD = "supersecretpassword123"
@@ -147,7 +128,6 @@ def admin_login():
         return jsonify({'message': 'Admin login successful!'}), 200
     return jsonify({'message': 'Invalid admin credentials'}), 401
 
-# --- NEW: Admin User Management API ---
 @app.route('/api/admin/users', methods=['GET'])
 def get_users():
     users = User.query.all()
@@ -158,35 +138,26 @@ def create_user():
     data = request.get_json()
     email = data.get('email')
     password = data.get('password')
-
     if not email or not password:
         return jsonify({'message': 'Email and password are required.'}), 400
     if User.query.filter_by(email=email).first():
         return jsonify({'message': 'User with this email already exists.'}), 409
-
     new_user = User(email=email)
     new_user.set_password(password)
     db.session.add(new_user)
     db.session.commit()
     return jsonify(new_user.to_dict()), 201
 
-# --- MODIFIED: create_bot now requires a userId ---
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
     data = request.get_json()
     bot_token = data.get('bot_token')
-    user_id = data.get('userId') # The frontend will need to send this
-
-    if not user_id:
-        return jsonify({'message': 'User ID is missing.'}), 400
-    
+    user_id = data.get('userId')
+    if not user_id: return jsonify({'message': 'User ID is missing.'}), 400
     user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'message': 'User not found.'}), 404
-
+    if not user: return jsonify({'message': 'User not found.'}), 404
     if Bot.query.filter_by(token=bot_token).first():
         return jsonify({'message': 'A bot with this token already exists.'}), 409
-
     new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=user.id)
     db.session.add(new_bot)
     db.session.commit()
@@ -197,13 +168,6 @@ def create_bot():
 def telegram_webhook(bot_token):
     run_async(handle_telegram_update(bot_token, request.get_json()))
     return "ok", 200
-
-# (All other routes remain the same)
-@app.route('/api/bots', methods=['GET'])
-def get_bots():
-    # This route will need to be updated to get bots for the logged-in user
-    # For now, it's disabled to avoid confusion.
-    return jsonify([])
 
 @app.route('/api/bots/<bot_id>', methods=['DELETE'])
 def delete_bot(bot_id):
@@ -250,3 +214,9 @@ def serve_admin_login_page(): return send_from_directory('.', 'admin.html')
 def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
+
+# This block is useful for local testing
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(host='0.0.0.0', port=5000, debug=True)
