@@ -468,3 +468,85 @@ button:active {
     color: inherit;
     flex-grow: 1; /* Makes the link area fill the space */
 }
+
+
+/* --- User Status & Toggle Switch Styles --- */
+
+.user-status-section {
+    background-color: #1e2a33;
+    padding: 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 2rem;
+}
+
+.status-control {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.status-control span {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.status-active {
+    color: #28a745; /* Green */
+}
+
+.status-inactive {
+    color: #dc3545; /* Red */
+}
+
+/* The switch - a checkbox with a custom slider */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.switch input { 
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #6a7a85;
+    transition: .4s;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+}
+
+input:checked + .slider {
+    background-color: #00aaff;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* Rounded sliders */
+.slider.round {
+    border-radius: 34px;
+}
+
+.slider.round:before {
+    border-radius: 50%;
+}
