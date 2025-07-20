@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Renders all products, grouped by category
     function renderAllProducts(categories) {
         productListDisplayDiv.innerHTML = ''; // Clear previous list
-        if (categories.length === 0) {
+        if (categories.length === 0 || categories.every(c => c.products.length === 0)) {
             const p = document.createElement('p');
             p.textContent = 'No products added yet.';
             productListDisplayDiv.appendChild(p);
@@ -77,13 +77,25 @@ document.addEventListener('DOMContentLoaded', () => {
             pageTitle.textContent = `Manage Bot (...${bot.id.slice(-6)})`;
             if (viewOrdersLink) viewOrdersLink.href = `/orders/${bot.id}`;
             
-            // Populate categories
+            // --- THIS IS THE FIX ---
+            // Clear existing lists before re-populating to prevent duplicates
+            categoryListDiv.innerHTML = '';
+            productCategorySelect.innerHTML = '<option value="">-- Select a Category --</option>';
+            
+            if (bot.categories.length > 0) {
+                if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
+            } else {
+                if (noCategoriesMessage) noCategoriesMessage.style.display = 'block';
+            }
+            // --- END FIX ---
+
+            // Re-populate the lists
             bot.categories.forEach(category => {
                 renderCategory(category);
                 addCategoryToSelect(category);
             });
 
-            // Populate product list
+            // Re-populate the product list
             renderAllProducts(bot.categories);
 
         } catch (error) {
