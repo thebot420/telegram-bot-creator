@@ -427,3 +427,27 @@ button:active {
     background-color: #ff6b6b;
     color: #ffffff;
 }
+
+
+
+/* --- Admin User List Styles --- */
+
+.user-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1e2a33;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    border: 1px solid #445;
+}
+
+.user-email {
+    font-weight: 500;
+}
+
+.user-bot-count {
+    color: #a0b0b9;
+    font-size: 0.9rem;
+}

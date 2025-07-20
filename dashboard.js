@@ -95,34 +95,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Handle the form submission to create a new bot
+  // Replace the addBotForm event listener in dashboard.js with this
     if (addBotForm) {
-        addBotForm.addEventListener('submit', async (event) => {
-            event.preventDefault(); 
-            
-            const bot_token = document.getElementById('bot-token').value;
-            const wallet_address = document.getElementById('wallet-address').value;
-            
-            try {
-                const response = await fetch('/api/bots', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ bot_token, wallet_address })
-                });
+    addBotForm.addEventListener('submit', async (event) => {
+        event.preventDefault(); 
 
-                if (response.ok) {
-                    const newBot = await response.json();
-                    renderBot(newBot);
-                    addBotModal.classList.add('hidden');
-                    addBotForm.reset();
-                } else {
-                    alert('Failed to create bot. Please try again.');
-                }
-            } catch (error) {
-                console.error('Error creating bot:', error);
-                alert('An error occurred.');
-            }
+        const bot_token = document.getElementById('bot-token').value;
+        const wallet_address = document.getElementById('wallet-address').value;
+        // --- NEW: Get the saved userId from local storage ---
+        const userId = localStorage.getItem('userId');
+
+        if (!userId) {
+            alert('Error: Not logged in. Please log in again.');
+            return;
+        }
+
+        const response = await fetch('/api/bots', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // --- NEW: Send the userId along with the bot info ---
+            body: JSON.stringify({ bot_token, wallet_address, userId })
         });
-    }
+
+        if (response.ok) {
+            const newBot = await response.json();
+            renderBot(newBot);
+            addBotModal.classList.add('hidden');
+            addBotForm.reset();
+        } else {
+            const error = await response.json();
+            alert(`Failed to create bot: ${error.message}`);
+        }
+    });
+}
 
     // Load any existing bots when the page first loads
     fetchAndDisplayBots();
