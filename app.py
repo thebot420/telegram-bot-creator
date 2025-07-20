@@ -7,10 +7,10 @@ import telegram
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
 import asyncio
-import os # NEW: To read environment variables
-import requests # NEW: To make API calls
-import hmac # NEW: For webhook security
-import hashlib # NEW: For webhook security
+import os
+import requests
+import hmac
+import hashlib
 import json
 
 # --- Logging Configuration ---
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_4xww_user:ZvtsS6mD0QRjPVKEH2w83fcBpeMonpnM@dpg-d1uifimmcj7s73eifvcg-a/bot_database_4xww'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -28,7 +28,7 @@ SERVER_URL = "https://telegram-bot-creator.onrender.com"
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
-# --- Helper function to run async code ---
+# --- Helper function to run async code robustly ---
 def run_async(coroutine):
     try:
         loop = asyncio.get_running_loop()
@@ -122,11 +122,9 @@ async def handle_telegram_update(bot_token, update_data):
                         await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
                     else:
                         await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
-            
             elif action == 'buy_product':
                 product = db.session.get(Product, item_id)
                 if product:
-                    # Call our own API to create a payment invoice with NOWPayments
                     api_url = f"{SERVER_URL}/api/orders/{product.id}/create-payment"
                     try:
                         response = requests.post(api_url)
@@ -137,19 +135,18 @@ async def handle_telegram_update(bot_token, update_data):
                             await bot.send_message(chat_id=chat_id, text=reply_text)
                         else:
                             logging.error(f"API call to create payment failed: {response.text}")
-                            await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment. Please try again later.")
+                            await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment.")
                     except Exception as e:
                         logging.error(f"Exception during internal API call: {e}")
-                        await bot.send_message(chat_id=chat_id, text="A critical error occurred. Please contact support.")
-
+                        await bot.send_message(chat_id=chat_id, text="A critical error occurred.")
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             if not bot_data.categories:
-                await bot.send_message(chat_id=chat_id, text="This shop is not set up yet. Please check back later!")
+                await bot.send_message(chat_id=chat_id, text="This shop is not set up yet.")
                 return
             keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in bot_data.categories]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
+            await bot.send_message(chat_id=chat_id, text="Welcome! Please select a category:", reply_markup=reply_markup)
         logging.info(f"--- Successfully processed update for chat ID {chat_id} ---")
 
 # --- API ROUTES ---
@@ -269,30 +266,19 @@ def get_user_dashboard_stats(user_id):
     stats = {'total_sales': round(total_sales, 2), 'total_orders': total_orders, 'recent_orders': recent_orders}
     return jsonify(stats)
 
-# --- Payment Routes ---
 @app.route('/api/orders/<product_id>/create-payment', methods=['POST'])
 def create_payment(product_id):
     product = db.session.get(Product, product_id)
-    if not product:
-        return jsonify({'message': 'Product not found'}), 404
-
+    if not product: return jsonify({'message': 'Product not found'}), 404
     new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
     db.session.add(new_order)
     db.session.commit()
-
     if not NOWPAYMENTS_API_KEY:
         logging.error("NOWPayments API key is not set.")
         return jsonify({'message': 'Payment processor is not configured.'}), 500
-
     headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-    payload = {
-        "price_amount": product.price,
-        "price_currency": "usd",
-        "order_id": new_order.id,
-        "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"
-    }
+    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
     response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-    
     if response.status_code == 201:
         payment_data = response.json()
         return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
@@ -303,31 +289,26 @@ def create_payment(product_id):
 @app.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():
     signature = request.headers.get('x-nowpayments-sig')
-    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY:
-        return "Configuration error", 400
+    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY: return "Configuration error", 400
     try:
         sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
         expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
         if not hmac.compare_digest(expected_signature, signature):
-            logging.warning("Invalid IPN signature received from NOWPayments.")
+            logging.warning("Invalid IPN signature from NOWPayments.")
             return "Invalid signature", 400
     except Exception as e:
         logging.error(f"Error during signature verification: {e}")
         return "Verification error", 400
-
     data = request.get_json()
     order_id = data.get('order_id')
     payment_status = data.get('payment_status')
-    
     order = db.session.get(Order, order_id)
     if order and payment_status == 'finished':
         order.status = 'paid'
         db.session.commit()
         logging.info(f"Order {order_id} marked as paid.")
-    
     return "ok", 200
 
-# (All other routes remain the same)
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
     data = request.get_json()
