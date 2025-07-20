@@ -49,6 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 userListDiv.innerHTML = '';
                 if (users.length === 0 && noUsersMessage) {
                     noUsersMessage.style.display = 'block';
+                } else if (noUsersMessage) {
+                    noUsersMessage.style.display = 'none';
                 }
                 users.forEach(user => renderUser(user));
             }
