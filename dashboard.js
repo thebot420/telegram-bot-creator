@@ -1,134 +1,91 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Get all the necessary elements ---
-    const createBotButton = document.getElementById('create-bot-button');
-    const addBotModal = document.getElementById('add-bot-modal');
-    const cancelButton = document.getElementById('cancel-button');
-    const addBotForm = document.getElementById('add-bot-form');
-    const logoutButton = document.getElementById('logout-button');
-    const botsListContainer = document.getElementById('bots-list-container');
-    const noBotsMessage = document.querySelector('.no-bots-message');
+    console.log("Admin Dashboard Script Loaded."); // DEBUG: Check if script is running
 
-    // --- Functions ---
+    const logoutButton = document.getElementById('admin-logout-button');
+    const createUserForm = document.getElementById('create-user-form');
+    const userListDiv = document.getElementById('user-list');
+    const noUsersMessage = document.getElementById('no-users-message');
 
-    // Function to render a single bot card on the dashboard
-    function renderBot(bot) {
-        if (noBotsMessage) {
-            noBotsMessage.classList.add('hidden');
-        }
-
-        const botCard = document.createElement('div');
-        botCard.className = 'bot-card';
-        botCard.innerHTML = `
-            <div class="bot-icon">🤖</div>
-            <div class="bot-details">
-                <h3>Bot ID: ...${bot.id.slice(-6)}</h3>
-                <p>Wallet: ...${bot.wallet.slice(-6)}</p>
-            </div>
-            <div class="bot-actions">
-                <button class="manage-btn">Manage</button>
-                <button class="delete-btn" data-id="${bot.id}">Delete</button>
-            </div>
-        `;
-
-        // Find the manage button and add a click event to it
-        const manageButton = botCard.querySelector('.manage-btn');
-        manageButton.addEventListener('click', () => {
-            window.location.href = `/manage/${bot.id}`;
+    // --- Logout Logic ---
+    if (logoutButton) {
+        logoutButton.addEventListener('click', () => {
+            window.location.href = '/admin';
         });
-
-        // Find the delete button and add a click event to it
-        const deleteButton = botCard.querySelector('.delete-btn');
-        deleteButton.addEventListener('click', async () => {
-            // Show a confirmation dialog to prevent accidental deletion
-            const isConfirmed = confirm('Are you sure you want to delete this bot? This action cannot be undone.');
-
-            if (isConfirmed) {
-                try {
-                    const response = await fetch(`/api/bots/${bot.id}`, {
-                        method: 'DELETE',
-                    });
-
-                    if (response.ok) {
-                        // If deletion is successful, remove the bot card from the page
-                        botCard.remove();
-                    } else {
-                        alert('Failed to delete bot.');
-                    }
-                } catch (error) {
-                    console.error('Error deleting bot:', error);
-                    alert('An error occurred while deleting the bot.');
-                }
-            }
-        });
-
-        botsListContainer.appendChild(botCard);
+    } else {
+        console.error("Logout button not found!"); // DEBUG
     }
 
-    // Function to fetch all bots from the server and display them
-    async function fetchAndDisplayBots() {
+    // --- Functions ---
+    function renderUser(user) {
+        if (noUsersMessage) {
+            noUsersMessage.style.display = 'none';
+        }
+        const userItem = document.createElement('div');
+        userItem.className = 'user-item';
+        userItem.innerHTML = `
+            <span class="user-email">${user.email}</span>
+            <span class="user-bot-count">${user.bots.length} bots</span>
+        `;
+        userListDiv.appendChild(userItem);
+    }
+
+    async function fetchAndDisplayUsers() {
+        console.log("Fetching users..."); // DEBUG
         try {
-            const response = await fetch('/api/bots');
-            const bots = await response.json();
-            bots.forEach(bot => renderBot(bot));
+            const response = await fetch('/api/admin/users');
+            if (response.ok) {
+                const users = await response.json();
+                console.log("Users received:", users); // DEBUG
+                userListDiv.innerHTML = ''; 
+                if (users.length === 0 && noUsersMessage) {
+                    noUsersMessage.style.display = 'block';
+                }
+                users.forEach(user => renderUser(user));
+            } else {
+                console.error("Failed to fetch users. Status:", response.status); // DEBUG
+            }
         } catch (error) {
-            console.error('Error fetching bots:', error);
+            console.error('Failed to fetch users:', error);
         }
     }
 
     // --- Event Listeners & Initial Load ---
+    if (createUserForm) {
+        console.log("Create user form found. Attaching event listener."); // DEBUG
+        createUserForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            console.log("Create User form submitted."); // DEBUG
 
-    // Logout Button
-    if (logoutButton) {
-        logoutButton.addEventListener('click', () => { window.location.href = '/'; });
-    }
+            const emailInput = document.getElementById('user-email');
+            const passwordInput = document.getElementById('user-password');
 
-    // Show modal
-    if (createBotButton) {
-        createBotButton.addEventListener('click', () => { addBotModal.classList.remove('hidden'); });
-    }
+            try {
+                const response = await fetch('/api/admin/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: emailInput.value,
+                        password: passwordInput.value
+                    })
+                });
 
-    // Hide modal
-    if (cancelButton) {
-        cancelButton.addEventListener('click', () => {
-            addBotModal.classList.add('hidden');
+                if (response.ok) {
+                    const newUser = await response.json();
+                    renderUser(newUser);
+                    createUserForm.reset();
+                } else {
+                    const error = await response.json();
+                    alert(`Error: ${error.message}`);
+                    console.error("Error creating user:", error.message); // DEBUG
+                }
+            } catch (error) {
+                console.error("A network error occurred while creating user:", error); // DEBUG
+            }
         });
+    } else {
+        console.error("Create user form not found!"); // DEBUG
     }
 
-    // Handle the form submission to create a new bot
-  // Replace the addBotForm event listener in dashboard.js with this
-    if (addBotForm) {
-    addBotForm.addEventListener('submit', async (event) => {
-        event.preventDefault(); 
-
-        const bot_token = document.getElementById('bot-token').value;
-        const wallet_address = document.getElementById('wallet-address').value;
-        // --- NEW: Get the saved userId from local storage ---
-        const userId = localStorage.getItem('userId');
-
-        if (!userId) {
-            alert('Error: Not logged in. Please log in again.');
-            return;
-        }
-
-        const response = await fetch('/api/bots', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // --- NEW: Send the userId along with the bot info ---
-            body: JSON.stringify({ bot_token, wallet_address, userId })
-        });
-
-        if (response.ok) {
-            const newBot = await response.json();
-            renderBot(newBot);
-            addBotModal.classList.add('hidden');
-            addBotForm.reset();
-        } else {
-            const error = await response.json();
-            alert(`Failed to create bot: ${error.message}`);
-        }
-    });
-}
-
-    // Load any existing bots when the page first loads
-    fetchAndDisplayBots();
+    // Load all users when the page opens
+    fetchAndDisplayUsers();
 });
