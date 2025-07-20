@@ -550,3 +550,34 @@ input:checked + .slider:before {
 .slider.round:before {
     border-radius: 50%;
 }
+
+
+/* --- Admin Edit User Styles --- */
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.page-header h2 {
+    margin: 0;
+}
+
+.page-header .btn-primary {
+    padding: 0.6rem 1.2rem;
+}
+
+.form-divider {
+    border: none;
+    border-top: 1px solid #445;
+    margin: 2rem 0;
+}
+
+/* --- Master Order Log Styles --- */
+.order-user-email {
+    display: block;
+    font-size: 0.8rem;
+    color: #a0b0b9;
+}

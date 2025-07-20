@@ -256,6 +256,26 @@ def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
+@app.route('/api/admin/orders', methods=['GET'])
+def get_all_orders():
+    """Gets all orders from all bots, ordered by most recent first."""
+    orders = Order.query.order_by(Order.timestamp.desc()).all()
+    # We need to add the user's email to the order data
+    orders_with_user_info = []
+    for order in orders:
+        order_data = order.to_dict()
+        order_data['user_email'] = order.bot.owner.email
+        orders_with_user_info.append(order_data)
+        
+    return jsonify(orders_with_user_info)
+
+
+
+
+
+
+
+
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
@@ -274,3 +294,7 @@ def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.ht
 def serve_user_details_page(user_id): return send_from_directory('.', 'admin_user_details.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
+@app.route('/admin/orders')
+def serve_master_orders_page():
+    """Serves the master order log page for the admin."""
+    return send_from_directory('.', 'admin_orders.html')
