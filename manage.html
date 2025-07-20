@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -21,31 +21,64 @@
 
     <main class="dashboard-main">
         <div class="dashboard-content">
-            <h2 id="manage-bot-title">Manage Bot</h2>
-
-            <div class="page-actions">
+            <div class="page-header">
+                <h2 id="manage-bot-title">Manage Bot</h2>
                 <a href="#" id="view-orders-link" class="btn-secondary">View Orders</a>
             </div>
 
+            <!-- NEW: Section to manage categories -->
+            <div class="content-section">
+                <h3>Manage Categories</h3>
+                <form id="add-category-form">
+                    <div class="input-group">
+                        <label for="category-name">New Category Name</label>
+                        <input type="text" id="category-name" required placeholder="e.g., Clothing, Services">
+                    </div>
+                    <button type="submit" class="btn-primary">Add Category</button>
+                </form>
+                <div id="category-list">
+                    <!-- Categories will be dynamically added here -->
+                    <p id="no-categories-message">No categories created yet.</p>
+                </div>
+            </div>
+
+            <!-- MODIFIED: Section to Add New Products -->
             <div class="content-section">
                 <h3>Add New Product</h3>
                 <form id="add-product-form">
+                    <!-- NEW: Category selection dropdown -->
+                    <div class="input-group">
+                        <label for="product-category">Category</label>
+                        <select id="product-category" required>
+                            <option value="">-- Select a Category --</option>
+                        </select>
+                    </div>
                     <div class="input-group">
                         <label for="product-name">Product Name</label>
                         <input type="text" id="product-name" required placeholder="e.g., Cool T-Shirt">
                     </div>
                     <div class="input-group">
-                        <label for="product-price">Price (in your chosen crypto)</label>
+                        <label for="product-price">Price</label>
                         <input type="number" step="any" id="product-price" required placeholder="e.g., 0.005">
+                    </div>
+                    <!-- NEW: Image and Video URL fields -->
+                    <div class="input-group">
+                        <label for="product-image-url">Image URL (Optional)</label>
+                        <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
+                    </div>
+                    <div class="input-group">
+                        <label for="product-video-url">Video URL (Optional)</label>
+                        <input type="url" id="product-video-url" placeholder="https://youtube.com/watch?v=...">
                     </div>
                     <button type="submit" class="btn-primary">Add Product</button>
                 </form>
             </div>
 
+            <!-- This section will now be populated by the JS -->
             <div class="content-section">
                 <h3>Your Products</h3>
-                <div id="product-list">
-                    <p id="no-products-message">No products added yet.</p>
+                <div id="product-list-display">
+                    <!-- Products will be displayed here by category -->
                 </div>
             </div>
         </div>

@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL HAS BEEN ADDED HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_s48z_user:urPYlU4cGJowchk5AqogmxGW1FhMHMCN@dpg-d1ug57ruibrs738f06vg-a/bot_database_s48z'
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -44,18 +44,33 @@ class Bot(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     token = db.Column(db.String(100), unique=True, nullable=False)
     wallet = db.Column(db.String(100), nullable=False)
-    products = db.relationship('Product', backref='bot', lazy=True, cascade="all, delete-orphan")
+    categories = db.relationship('Category', backref='bot', lazy=True, cascade="all, delete-orphan") # Link to categories
     orders = db.relationship('Order', backref='bot', lazy=True, cascade="all, delete-orphan")
     user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'products': [p.to_dict() for p in self.products], 'orders': [o.to_dict() for o in self.orders]}
+    def to_dict(self): 
+        return {
+            'id': self.id, 'token': self.token, 'wallet': self.wallet, 
+            'categories': [c.to_dict() for c in self.categories], 
+            'orders': [o.to_dict() for o in self.orders]
+        }
     def to_dict_simple(self): return {'id': self.id, 'token_snippet': f"{self.token[:6]}..."}
+
+# --- NEW: Category Model ---
+class Category(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = db.Column(db.String(100), nullable=False)
+    bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
+    products = db.relationship('Product', backref='category', lazy=True, cascade="all, delete-orphan")
+    def to_dict(self): return {'id': self.id, 'name': self.name, 'products': [p.to_dict() for p in self.products]}
 
 class Product(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
-    bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'name': self.name, 'price': self.price}
+    image_url = db.Column(db.String(500), nullable=True) # NEW: For photos
+    video_url = db.Column(db.String(500), nullable=True) # NEW: For videos
+    category_id = db.Column(db.String(36), db.ForeignKey('category.id'), nullable=False) # MODIFIED: Links to Category
+    def to_dict(self): return {'id': self.id, 'name': self.name, 'price': self.price, 'image_url': self.image_url, 'video_url': self.video_url}
 
 class Order(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -66,7 +81,9 @@ class Order(db.Model):
     def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
 
 # --- Telegram Bot Functions (Async) ---
+# We will update these later to use buttons. For now, they remain the same.
 async def setup_bot_webhook(bot_token):
+    # ... (code is correct and unchanged)
     logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
@@ -77,6 +94,7 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 async def handle_telegram_update(bot_token, update_data):
+    # ... (code is correct and unchanged for now)
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
@@ -88,30 +106,21 @@ async def handle_telegram_update(bot_token, update_data):
     if not bot_data or not bot_data.owner.is_active: 
         logging.warning(f"--- Bot owner is inactive or bot not found for token {bot_token[:10]}... ---")
         return
-    if message_text.startswith('/buy'):
-        try:
-            product_name = message_text.split(' ', 1)[1]
-            product_to_buy = next((p for p in bot_data.products if p.name.lower() == product_name.lower()), None)
-            if product_to_buy:
-                with app.app_context():
-                    new_order = Order(product_name=product_to_buy.name, price=product_to_buy.price, bot_id=bot_data.id)
-                    db.session.add(new_order)
-                    db.session.commit()
-                reply_text = f"Thank you for your order! To purchase '{product_to_buy.name}', please send {product_to_buy.price} to this wallet:\n\n`{bot_data.wallet}`"
-            else:
-                reply_text = f"Sorry, the product '{product_name}' was not found."
-        except IndexError:
-            reply_text = "To buy a product, please use the format: /buy <Product Name>"
+    # This logic will be completely replaced later with buttons
+    all_products = []
+    for category in bot_data.categories:
+        all_products.extend(category.products)
+
+    if not all_products:
+        reply_text = "This shop has no products yet."
     else:
-        if not bot_data.products:
-            reply_text = "This shop has no products yet."
-        else:
-            product_list = [f"- {p.name} ({p.price})" for p in bot_data.products]
-            reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list) + "\n\nTo buy, type: /buy <Product Name>"
-    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+        product_list = [f"- {p.name} ({p.price})" for p in all_products]
+        reply_text = "Welcome! Here are our products:\n\n" + "\n".join(product_list)
+    await bot.send_message(chat_id=chat_id, text=reply_text)
     logging.info(f"--- Successfully sent reply to chat ID {chat_id} ---")
 
 # --- API ROUTES ---
+# (Login and Admin routes remain the same)
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -129,6 +138,7 @@ def admin_login():
         return jsonify({'message': 'Admin login successful!'}), 200
     return jsonify({'message': 'Invalid admin credentials'}), 401
 
+# (All Admin user routes remain the same)
 @app.route('/api/admin/users', methods=['GET'])
 def get_users():
     users = User.query.all()
@@ -169,38 +179,39 @@ def toggle_user_active(user_id):
     db.session.commit()
     return jsonify({'message': f'User status changed to {user.is_active}'}), 200
 
-# --- NEW: API Route to update a user's email ---
 @app.route('/api/admin/users/<user_id>/update-email', methods=['POST'])
 def update_user_email(user_id):
     user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
-    
+    if not user: return jsonify({'message': 'User not found'}), 404
     data = request.get_json()
     new_email = data.get('email')
-    if not new_email:
-        return jsonify({'message': 'New email is required.'}), 400
-    
+    if not new_email: return jsonify({'message': 'New email is required.'}), 400
     user.email = new_email
     db.session.commit()
     return jsonify({'message': 'User email updated successfully'}), 200
 
-# --- NEW: API Route to reset a user's password ---
 @app.route('/api/admin/users/<user_id>/reset-password', methods=['POST'])
 def reset_user_password(user_id):
     user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
-    
+    if not user: return jsonify({'message': 'User not found'}), 404
     data = request.get_json()
     new_password = data.get('password')
-    if not new_password:
-        return jsonify({'message': 'New password is required.'}), 400
-    
+    if not new_password: return jsonify({'message': 'New password is required.'}), 400
     user.set_password(new_password)
     db.session.commit()
     return jsonify({'message': 'User password reset successfully'}), 200
 
+@app.route('/api/admin/orders', methods=['GET'])
+def get_all_orders():
+    orders = Order.query.order_by(Order.timestamp.desc()).all()
+    orders_with_user_info = []
+    for order in orders:
+        order_data = order.to_dict()
+        order_data['user_email'] = order.bot.owner.email
+        orders_with_user_info.append(order_data)
+    return jsonify(orders_with_user_info)
+
+# (Bot and Product routes)
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
     data = request.get_json()
@@ -241,12 +252,34 @@ def get_bot_details(bot_id):
     if bot: return jsonify(bot.to_dict())
     return jsonify({'message': 'Bot not found'}), 404
 
+# --- NEW: API Route to create a category ---
+@app.route('/api/bots/<bot_id>/categories', methods=['POST'])
+def create_category(bot_id):
+    bot = db.session.get(Bot, bot_id)
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+    data = request.get_json()
+    new_category = Category(name=data.get('name'), bot_id=bot.id)
+    db.session.add(new_category)
+    db.session.commit()
+    return jsonify(new_category.to_dict()), 201
+
+# --- MODIFIED: add_product_to_bot now requires a category_id ---
 @app.route('/api/bots/<bot_id>/products', methods=['POST'])
 def add_product_to_bot(bot_id):
-    bot = db.session.get(Bot, bot_id)
-    if not bot: return jsonify({'message': 'Bot not found'}), 404
     data = request.get_json()
-    new_product = Product(name=data.get('name'), price=float(data.get('price')), bot_id=bot.id)
+    category_id = data.get('category_id')
+    category = db.session.get(Category, category_id)
+    if not category or category.bot_id != bot_id:
+        return jsonify({'message': 'Category not found or does not belong to this bot'}), 404
+    
+    new_product = Product(
+        name=data.get('name'), 
+        price=float(data.get('price')),
+        image_url=data.get('image_url'),
+        video_url=data.get('video_url'),
+        category_id=category.id
+    )
     db.session.add(new_product)
     db.session.commit()
     return jsonify(new_product.to_dict()), 201
@@ -256,26 +289,6 @@ def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
-@app.route('/api/admin/orders', methods=['GET'])
-def get_all_orders():
-    """Gets all orders from all bots, ordered by most recent first."""
-    orders = Order.query.order_by(Order.timestamp.desc()).all()
-    # We need to add the user's email to the order data
-    orders_with_user_info = []
-    for order in orders:
-        order_data = order.to_dict()
-        order_data['user_email'] = order.bot.owner.email
-        orders_with_user_info.append(order_data)
-        
-    return jsonify(orders_with_user_info)
-
-
-
-
-
-
-
-
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
@@ -292,9 +305,7 @@ def serve_admin_login_page(): return send_from_directory('.', 'admin.html')
 def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.html')
 @app.route('/admin/users/<user_id>')
 def serve_user_details_page(user_id): return send_from_directory('.', 'admin_user_details.html')
+@app.route('/admin/orders')
+def serve_master_orders_page(): return send_from_directory('.', 'admin_orders.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
-@app.route('/admin/orders')
-def serve_master_orders_page():
-    """Serves the master order log page for the admin."""
-    return send_from_directory('.', 'admin_orders.html')

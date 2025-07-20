@@ -581,3 +581,41 @@ input:checked + .slider:before {
     font-size: 0.8rem;
     color: #a0b0b9;
 }
+
+
+/* --- Category Management Styles --- */
+
+#category-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.category-item {
+    background-color: #3e4f5a;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+select {
+    width: 100%;
+    padding: 0.8rem 1rem;
+    border: 1px solid #445;
+    border-radius: 8px;
+    box-sizing: border-box;
+    background-color: #1e2a33;
+    color: #e0e0e0;
+    font-size: 1rem;
+    font-family: 'Poppins', sans-serif;
+}
+
+.product-category-section h4 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    color: #00aaff;
+    border-bottom: 1px solid #445;
+    padding-bottom: 0.5rem;
+}
