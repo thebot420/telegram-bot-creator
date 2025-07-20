@@ -619,3 +619,34 @@ select {
     border-bottom: 1px solid #445;
     padding-bottom: 0.5rem;
 }
+
+
+
+/* --- Category Delete Button Styles --- */
+.category-item {
+    /* This will align the new button correctly */
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.delete-category-btn {
+    background: #556672;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 20px;
+    text-align: center;
+    padding: 0;
+    transition: background-color 0.2s;
+    font-weight: bold;
+}
+
+.delete-category-btn:hover {
+    background: #dc3545; /* Red on hover */
+}
+

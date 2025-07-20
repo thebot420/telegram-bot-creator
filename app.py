@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
 import datetime
 import telegram
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup # NEW: Import button tools
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
 import asyncio
 
@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- App & DB Initialization ---
 app = Flask(__name__)
 # --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'YOUR_DATABASE_URL_HERE'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -31,7 +31,6 @@ def run_async(coroutine):
     return loop.run_until_complete(coroutine)
 
 # --- Database Models ---
-# (Models are correct and unchanged)
 class User(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -78,7 +77,6 @@ class Order(db.Model):
 
 # --- Telegram Bot Functions (Async) ---
 async def setup_bot_webhook(bot_token):
-    # ... (This function is correct and unchanged)
     logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
@@ -88,74 +86,57 @@ async def setup_bot_webhook(bot_token):
     except Exception as e:
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
-# --- NEW: Completely Rebuilt Telegram Handler ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
-
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-    
     if not bot_data or not bot_data.owner.is_active: 
         logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
         return
-
-    # --- Case 1: A button was pressed (CallbackQuery) ---
     if update.callback_query:
         query = update.callback_query
         chat_id = query.message.chat_id
         data = query.data
-        await query.answer() # Acknowledge the button press
-
-        # Callback data is formatted like "action:id"
+        await query.answer()
         action, item_id = data.split(':')
-
-        if action == 'view_category':
-            category = db.session.get(Category, item_id)
-            if not category or not category.products:
-                await bot.send_message(chat_id=chat_id, text=f"No products found in {category.name}.")
-                return
-            
-            for product in category.products:
-                caption = f"{product.name}\nPrice: {product.price}"
-                keyboard = [[InlineKeyboardButton(f"Buy {product.name}", callback_data=f"buy_product:{product.id}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                if product.image_url:
-                    await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
-                else:
-                    await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
-
-        elif action == 'buy_product':
-            product = db.session.get(Product, item_id)
-            if product:
-                with app.app_context():
+        with app.app_context():
+            if action == 'view_category':
+                category = db.session.get(Category, item_id)
+                if not category or not category.products:
+                    await bot.send_message(chat_id=chat_id, text=f"No products found in {category.name}.")
+                    return
+                for product in category.products:
+                    caption = f"{product.name}\nPrice: {product.price}"
+                    keyboard = [[InlineKeyboardButton(f"Buy {product.name}", callback_data=f"buy_product:{product.id}")]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    if product.image_url:
+                        await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
+                    else:
+                        await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
+            elif action == 'buy_product':
+                product = db.session.get(Product, item_id)
+                if product:
                     new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
                     db.session.add(new_order)
                     db.session.commit()
-                reply_text = f"Thank you for your order! To purchase '{product.name}', please send {product.price} to this wallet:\n\n`{bot_data.wallet}`"
-                await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
-
-    # --- Case 2: A text message was sent (e.g., /start) ---
+                    reply_text = f"Thank you for your order! To purchase '{product.name}', please send {product.price} to this wallet:\n\n`{bot_data.wallet}`"
+                    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
     elif update.message and update.message.text:
         chat_id = update.message.chat_id
-        
-        if not bot_data.categories:
-            await bot.send_message(chat_id=chat_id, text="This shop is not set up yet. Please check back later!")
-            return
-
-        keyboard = []
-        for category in bot_data.categories:
-            # Each button's callback data is "view_category:CATEGORY_ID"
-            button = InlineKeyboardButton(category.name, callback_data=f"view_category:{category.id}")
-            keyboard.append([button])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
+        with app.app_context():
+            if not bot_data.categories:
+                await bot.send_message(chat_id=chat_id, text="This shop is not set up yet. Please check back later!")
+                return
+            keyboard = []
+            for category in bot_data.categories:
+                button = InlineKeyboardButton(category.name, callback_data=f"view_category:{category.id}")
+                keyboard.append([button])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
 
 # --- API ROUTES ---
-# (All API and Page Serving routes are correct and unchanged)
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -294,6 +275,16 @@ def create_category(bot_id):
     db.session.add(new_category)
     db.session.commit()
     return jsonify(new_category.to_dict()), 201
+
+# --- NEW: API Route to delete a category ---
+@app.route('/api/categories/<category_id>', methods=['DELETE'])
+def delete_category(category_id):
+    category = db.session.get(Category, category_id)
+    if not category:
+        return jsonify({'message': 'Category not found'}), 404
+    db.session.delete(category)
+    db.session.commit()
+    return jsonify({'message': 'Category deleted successfully'}), 200
 
 @app.route('/api/bots/<bot_id>/products', methods=['POST'])
 def add_product_to_bot(bot_id):

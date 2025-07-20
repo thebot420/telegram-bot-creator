@@ -15,15 +15,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Functions ---
 
-    // Renders a single category in the "Manage Categories" list
+   // Replace the old renderCategory function in manage.js with this new one
     function renderCategory(category) {
-        if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
-        
-        const categoryItem = document.createElement('div');
-        categoryItem.className = 'category-item';
-        categoryItem.textContent = category.name;
-        categoryListDiv.appendChild(categoryItem);
-    }
+    if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
+    
+    const categoryItem = document.createElement('div');
+    categoryItem.className = 'category-item';
+    // NEW: Added a span for the name and a delete button
+    categoryItem.innerHTML = `
+        <span>${category.name}</span>
+        <button class="delete-category-btn" data-id="${category.id}">&times;</button>
+    `;
+
+    // NEW: Add click event listener for the new delete button
+    const deleteButton = categoryItem.querySelector('.delete-category-btn');
+    deleteButton.addEventListener('click', async () => {
+        if (confirm(`Are you sure you want to delete the category "${category.name}"? All products within it will also be deleted.`)) {
+            try {
+                const response = await fetch(`/api/categories/${category.id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    // Remove the category from the list on the page
+                    categoryItem.remove();
+                    // Remove the category from the product dropdown menu
+                    const optionToRemove = productCategorySelect.querySelector(`option[value="${category.id}"]`);
+                    if (optionToRemove) {
+                        optionToRemove.remove();
+                    }
+                } else {
+                    alert('Failed to delete category.');
+                }
+            } catch (error) {
+                console.error("Error deleting category:", error);
+                alert("An error occurred while deleting the category.");
+            }
+        }
+    });
+
+    categoryListDiv.appendChild(categoryItem);
+}
+
 
     // Adds a category to the dropdown in the "Add Product" form
     function addCategoryToSelect(category) {
