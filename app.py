@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
+# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -21,14 +21,13 @@ db = SQLAlchemy(app)
 # --- Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
 
-# --- Helper function to run async code robustly ---
+# --- Helper function to run async code ---
 def run_async(coroutine):
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
     return loop.run_until_complete(coroutine)
 
 # --- Database Models ---
@@ -91,24 +90,17 @@ async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
-    
-    # --- THIS IS THE CRITICAL FIX ---
-    # We now keep the app_context open for the entire function
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        
         if not bot_data or not bot_data.owner.is_active: 
             logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
             return
-
-        # --- Case 1: A button was pressed (CallbackQuery) ---
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
             data = query.data
             await query.answer()
             action, item_id = data.split(':')
-
             if action == 'view_category':
                 category = db.session.get(Category, item_id)
                 if not category or not category.products:
@@ -122,7 +114,6 @@ async def handle_telegram_update(bot_token, update_data):
                         await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
                     else:
                         await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
-
             elif action == 'buy_product':
                 product = db.session.get(Product, item_id)
                 if product:
@@ -131,11 +122,8 @@ async def handle_telegram_update(bot_token, update_data):
                     db.session.commit()
                     reply_text = f"Thank you for your order! To purchase '{product.name}', please send {product.price} to this wallet:\n\n`{bot_data.wallet}`"
                     await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
-
-        # --- Case 2: A text message was sent (e.g., /start) ---
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
-            
             if not bot_data.categories:
                 await bot.send_message(chat_id=chat_id, text="This shop is not set up yet. Please check back later!")
                 return
@@ -145,7 +133,6 @@ async def handle_telegram_update(bot_token, update_data):
                 keyboard.append([button])
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
-        
         logging.info(f"--- Successfully processed update for chat ID {chat_id} ---")
 
 # --- API ROUTES ---
@@ -288,10 +275,12 @@ def create_category(bot_id):
     db.session.commit()
     return jsonify(new_category.to_dict()), 201
 
+# --- NEW: API Route to delete a category ---
 @app.route('/api/categories/<category_id>', methods=['DELETE'])
 def delete_category(category_id):
     category = db.session.get(Category, category_id)
-    if not category: return jsonify({'message': 'Category not found'}), 404
+    if not category:
+        return jsonify({'message': 'Category not found'}), 404
     db.session.delete(category)
     db.session.commit()
     return jsonify({'message': 'Category deleted successfully'}), 200
@@ -313,6 +302,27 @@ def get_bot_orders(bot_id):
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
 
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+def get_dashboard_stats():
+    total_sales = db.session.query(db.func.sum(Order.price)).scalar() or 0
+    total_orders = Order.query.count()
+    commission_earned = total_sales * 0.01
+    active_users = User.query.filter_by(is_active=True).count()
+    recent_orders_query = Order.query.order_by(Order.timestamp.desc()).limit(5).all()
+    recent_orders = []
+    for order in recent_orders_query:
+        order_data = order.to_dict()
+        order_data['user_email'] = order.bot.owner.email
+        recent_orders.append(order_data)
+    stats = {
+        'total_sales': round(total_sales, 2),
+        'commission_earned': round(commission_earned, 2),
+        'total_orders': total_orders,
+        'active_users': active_users,
+        'recent_orders': recent_orders
+    }
+    return jsonify(stats)
+
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
 def serve_login_page(): return send_from_directory('.', 'index.html')
@@ -325,7 +335,9 @@ def serve_orders_page(bot_id): return send_from_directory('.', 'orders.html')
 @app.route('/admin')
 def serve_admin_login_page(): return send_from_directory('.', 'admin.html')
 @app.route('/admin/dashboard')
-def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.html')
+def serve_admin_dashboard(): return send_from_directory('.', 'admin_main_dashboard.html')
+@app.route('/admin/users')
+def serve_admin_users_page(): return send_from_directory('.', 'admin_users.html')
 @app.route('/admin/users/<user_id>')
 def serve_user_details_page(user_id): return send_from_directory('.', 'admin_user_details.html')
 @app.route('/admin/orders')

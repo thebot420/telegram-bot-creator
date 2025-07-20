@@ -1,0 +1,61 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Admin Dashboard - Bot Creator</title>
+        <link rel="stylesheet" href="/style.css">
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700&display=swap" rel="stylesheet">
+        <!-- NEW: Add the Chart.js library -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    </head>
+    <body class="dashboard-body">
+
+        <header class="dashboard-header">
+            <div class="header-logo">
+                <h1>Admin Panel</h1>
+            </div>
+            <div class="header-user">
+                <a href="/admin/users" class="header-link">Manage Users</a>
+                <a href="/admin/orders" class="header-link">Master Order Log</a>
+                <button id="admin-logout-button">Logout</button>
+            </div>
+        </header>
+
+        <main class="dashboard-main">
+            <div class="dashboard-content">
+                <h2>Platform Overview</h2>
+                
+                <!-- Key Metric Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h4>Total Sales Volume</h4>
+                        <p id="total-sales">Loading...</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Commission Earned (1%)</h4>
+                        <p id="commission-earned">Loading...</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Total Orders</h4>
+                        <p id="total-orders">Loading...</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Active Users</h4>
+                        <p id="active-users">Loading...</p>
+                    </div>
+                </div>
+
+                <!-- Recent Orders List -->
+                <div class="content-section">
+                    <h3>Recent Orders</h3>
+                    <div id="recent-orders-list">
+                        <p id="no-recent-orders">No recent orders.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <script src="/admin_main_dashboard.js"></script>
+    </body>
+    </html>

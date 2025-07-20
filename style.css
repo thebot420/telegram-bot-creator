@@ -650,3 +650,31 @@ select {
     background: #dc3545; /* Red on hover */
 }
 
+/* --- Admin Stat Card Styles --- */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background-color: #1e2a33;
+    padding: 1.5rem;
+    border-radius: 10px;
+    border: 1px solid #445;
+}
+
+.stat-card h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+    color: #a0b0b9;
+    font-weight: 500;
+}
+
+.stat-card p {
+    margin: 0;
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #ffffff;
+}
