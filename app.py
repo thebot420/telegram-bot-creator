@@ -7,19 +7,26 @@ import telegram
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
 import asyncio
+import os # NEW: To read environment variables
+import requests # NEW: To make API calls
+import hmac # NEW: For webhook security
+import hashlib # NEW: For webhook security
+import json
 
 # --- Logging Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'YOUR_DATABASE_URL_HERE'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- Telegram Bot Setup ---
+# --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
+NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
+NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
 # --- Helper function to run async code ---
 def run_async(coroutine):
@@ -72,8 +79,9 @@ class Order(db.Model):
     product_name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status = db.Column(db.String(20), default='pending', nullable=False) # NEW: Order status
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat()}
+    def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat(), 'status': self.status}
 
 # --- Telegram Bot Functions (Async) ---
 async def setup_bot_webhook(bot_token):
@@ -117,29 +125,25 @@ async def handle_telegram_update(bot_token, update_data):
             elif action == 'buy_product':
                 product = db.session.get(Product, item_id)
                 if product:
-                    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
-                    db.session.add(new_order)
-                    db.session.commit()
-                    reply_text = f"Thank you for your order! To purchase '{product.name}', please send {product.price} to this wallet:\n\n`{bot_data.wallet}`"
-                    await bot.send_message(chat_id=chat_id, text=reply_text, parse_mode='Markdown')
+                    # Create a payment invoice via our API
+                    api_url = f"{SERVER_URL}/api/orders/{product.id}/create-payment"
+                    response = requests.post(api_url)
+                    if response.status_code == 201:
+                        payment_info = response.json()
+                        invoice_url = payment_info.get('invoice_url')
+                        reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
+                        await bot.send_message(chat_id=chat_id, text=reply_text)
+                    else:
+                        await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment. Please try again later.")
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             if not bot_data.categories:
                 await bot.send_message(chat_id=chat_id, text="This shop is not set up yet. Please check back later!")
                 return
-            keyboard = []
-            for category in bot_data.categories:
-                button = InlineKeyboardButton(category.name, callback_data=f"view_category:{category.id}")
-                keyboard.append([button])
+            keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in bot_data.categories]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
         logging.info(f"--- Successfully processed update for chat ID {chat_id} ---")
-
-
-
-
-
-
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -159,6 +163,7 @@ def admin_login():
         return jsonify({'message': 'Admin login successful!'}), 200
     return jsonify({'message': 'Invalid admin credentials'}), 401
 
+# (All Admin user routes are unchanged)
 @app.route('/api/admin/users', methods=['GET'])
 def get_users():
     users = User.query.all()
@@ -231,6 +236,75 @@ def get_all_orders():
         orders_with_user_info.append(order_data)
     return jsonify(orders_with_user_info)
 
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+def get_dashboard_stats():
+    total_sales = db.session.query(db.func.sum(Order.price)).scalar() or 0
+    total_orders = Order.query.count()
+    commission_earned = total_sales * 0.01
+    active_users = User.query.filter_by(is_active=True).count()
+    recent_orders_query = Order.query.order_by(Order.timestamp.desc()).limit(5).all()
+    recent_orders = []
+    for order in recent_orders_query:
+        order_data = order.to_dict()
+        order_data['user_email'] = order.bot.owner.email
+        recent_orders.append(order_data)
+    stats = {'total_sales': round(total_sales, 2), 'commission_earned': round(commission_earned, 2), 'total_orders': total_orders, 'active_users': active_users, 'recent_orders': recent_orders}
+    return jsonify(stats)
+
+# --- NEW: Payment Routes ---
+@app.route('/api/orders/<product_id>/create-payment', methods=['POST'])
+def create_payment(product_id):
+    product = db.session.get(Product, product_id)
+    if not product:
+        return jsonify({'message': 'Product not found'}), 404
+
+    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
+    db.session.add(new_order)
+    db.session.commit()
+
+    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+    payload = {
+        "price_amount": product.price,
+        "price_currency": "usd",
+        "order_id": new_order.id,
+        "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"
+    }
+    response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
+    
+    if response.status_code == 201:
+        payment_data = response.json()
+        return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
+    else:
+        logging.error(f"NOWPayments error: {response.text}")
+        return jsonify({'message': 'Failed to create payment invoice.'}), 500
+
+@app.route('/webhook/nowpayments', methods=['POST'])
+def nowpayments_webhook():
+    signature = request.headers.get('x-nowpayments-sig')
+    if not signature: return "Signature missing", 400
+    try:
+        sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
+        expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
+        if not hmac.compare_digest(expected_signature, signature):
+            logging.warning("Invalid IPN signature received from NOWPayments.")
+            return "Invalid signature", 400
+    except Exception as e:
+        logging.error(f"Error during signature verification: {e}")
+        return "Verification error", 400
+
+    data = request.get_json()
+    order_id = data.get('order_id')
+    payment_status = data.get('payment_status')
+    
+    order = db.session.get(Order, order_id)
+    if order and payment_status == 'finished':
+        order.status = 'paid'
+        db.session.commit()
+        logging.info(f"Order {order_id} marked as paid.")
+    
+    return "ok", 200
+
+# (All other routes remain the same)
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
     data = request.get_json()
@@ -281,12 +355,10 @@ def create_category(bot_id):
     db.session.commit()
     return jsonify(new_category.to_dict()), 201
 
-# --- NEW: API Route to delete a category ---
 @app.route('/api/categories/<category_id>', methods=['DELETE'])
 def delete_category(category_id):
     category = db.session.get(Category, category_id)
-    if not category:
-        return jsonify({'message': 'Category not found'}), 404
+    if not category: return jsonify({'message': 'Category not found'}), 404
     db.session.delete(category)
     db.session.commit()
     return jsonify({'message': 'Category deleted successfully'}), 200
@@ -307,60 +379,6 @@ def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
-
-@app.route('/api/admin/dashboard-stats', methods=['GET'])
-def get_dashboard_stats():
-    total_sales = db.session.query(db.func.sum(Order.price)).scalar() or 0
-    total_orders = Order.query.count()
-    commission_earned = total_sales * 0.01
-    active_users = User.query.filter_by(is_active=True).count()
-    recent_orders_query = Order.query.order_by(Order.timestamp.desc()).limit(5).all()
-    recent_orders = []
-    for order in recent_orders_query:
-        order_data = order.to_dict()
-        order_data['user_email'] = order.bot.owner.email
-        recent_orders.append(order_data)
-    stats = {
-        'total_sales': round(total_sales, 2),
-        'commission_earned': round(commission_earned, 2),
-        'total_orders': total_orders,
-        'active_users': active_users,
-        'recent_orders': recent_orders
-    }
-    return jsonify(stats)
-
-@app.route('/api/users/<user_id>/dashboard-stats', methods=['GET'])
-def get_user_dashboard_stats(user_id):
-    """Calculates and returns key metrics for a specific user's dashboard."""
-    user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
-
-    # Find all bot IDs owned by this user
-    bot_ids = [bot.id for bot in user.bots]
-
-    # Calculate total sales and orders only from this user's bots
-    total_sales = db.session.query(db.func.sum(Order.price)).filter(Order.bot_id.in_(bot_ids)).scalar() or 0
-    total_orders = Order.query.filter(Order.bot_id.in_(bot_ids)).count()
-
-    # Get the 5 most recent orders for this user
-    recent_orders_query = Order.query.filter(Order.bot_id.in_(bot_ids)).order_by(Order.timestamp.desc()).limit(5).all()
-    recent_orders = [order.to_dict() for order in recent_orders_query]
-    
-    stats = {
-        'total_sales': round(total_sales, 2),
-        'total_orders': total_orders,
-        'recent_orders': recent_orders
-    }
-    
-    return jsonify(stats)
-
-
-
-
-
-
-
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
