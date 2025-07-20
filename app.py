@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_chit_user:iTbAiEZAkUdeZxrM79hpj8DxdrHWVtQo@dpg-d1u36v7diees73abuh5g-a/bot_database_chit'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -148,6 +147,15 @@ def create_user():
     db.session.commit()
     return jsonify(new_user.to_dict()), 201
 
+@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'User deleted successfully'}), 200
+
 @app.route('/api/bots', methods=['POST'])
 def create_bot():
     data = request.get_json()
@@ -168,6 +176,13 @@ def create_bot():
 def telegram_webhook(bot_token):
     run_async(handle_telegram_update(bot_token, request.get_json()))
     return "ok", 200
+
+@app.route('/api/users/<user_id>/bots', methods=['GET'])
+def get_user_bots(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify([bot.to_dict() for bot in user.bots])
 
 @app.route('/api/bots/<bot_id>', methods=['DELETE'])
 def delete_bot(bot_id):
@@ -196,27 +211,8 @@ def add_product_to_bot(bot_id):
 @app.route('/api/bots/<bot_id>/orders', methods=['GET'])
 def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
+    if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
-
-
-@app.route('/api/admin/users/<user_id>', methods=['DELETE'])
-def delete_user(user_id):
-    """Deletes a user from the database."""
-    user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'message': 'User not found'}), 404
-    
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({'message': 'User deleted successfully'}), 200
-
-
-
-
-
-
-
-
 
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
@@ -233,9 +229,3 @@ def serve_admin_login_page(): return send_from_directory('.', 'admin.html')
 def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
-
-# This block is useful for local testing
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    app.run(host='0.0.0.0', port=5000, debug=True)

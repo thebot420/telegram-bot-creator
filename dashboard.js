@@ -1,91 +1,134 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("Admin Dashboard Script Loaded."); // DEBUG: Check if script is running
-
-    const logoutButton = document.getElementById('admin-logout-button');
-    const createUserForm = document.getElementById('create-user-form');
-    const userListDiv = document.getElementById('user-list');
-    const noUsersMessage = document.getElementById('no-users-message');
-
-    // --- Logout Logic ---
-    if (logoutButton) {
-        logoutButton.addEventListener('click', () => {
-            window.location.href = '/admin';
-        });
-    } else {
-        console.error("Logout button not found!"); // DEBUG
-    }
+    // --- Get all the necessary elements ---
+    const createBotButton = document.getElementById('create-bot-button');
+    const addBotModal = document.getElementById('add-bot-modal');
+    const cancelButton = document.getElementById('cancel-button');
+    const addBotForm = document.getElementById('add-bot-form');
+    const logoutButton = document.getElementById('logout-button');
+    const botsListContainer = document.getElementById('bots-list-container');
+    const noBotsMessage = document.querySelector('.no-bots-message');
 
     // --- Functions ---
-    function renderUser(user) {
-        if (noUsersMessage) {
-            noUsersMessage.style.display = 'none';
+
+    // Function to render a single bot card on the dashboard
+    function renderBot(bot) {
+        if (noBotsMessage) {
+            noBotsMessage.classList.add('hidden');
         }
-        const userItem = document.createElement('div');
-        userItem.className = 'user-item';
-        userItem.innerHTML = `
-            <span class="user-email">${user.email}</span>
-            <span class="user-bot-count">${user.bots.length} bots</span>
+
+        const botCard = document.createElement('div');
+        botCard.className = 'bot-card';
+        botCard.innerHTML = `
+            <div class="bot-icon">🤖</div>
+            <div class="bot-details">
+                <h3>Bot ID: ...${bot.id.slice(-6)}</h3>
+                <p>Wallet: ...${bot.wallet.slice(-6)}</p>
+            </div>
+            <div class="bot-actions">
+                <button class="manage-btn">Manage</button>
+                <button class="delete-btn" data-id="${bot.id}">Delete</button>
+            </div>
         `;
-        userListDiv.appendChild(userItem);
+
+        const manageButton = botCard.querySelector('.manage-btn');
+        manageButton.addEventListener('click', () => {
+            window.location.href = `/manage/${bot.id}`;
+        });
+
+        const deleteButton = botCard.querySelector('.delete-btn');
+        deleteButton.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to delete this bot?')) {
+                const response = await fetch(`/api/bots/${bot.id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    botCard.remove();
+                } else {
+                    alert('Failed to delete bot.');
+                }
+            }
+        });
+
+        botsListContainer.appendChild(botCard);
     }
 
-    async function fetchAndDisplayUsers() {
-        console.log("Fetching users..."); // DEBUG
+    // Function to fetch all bots for the logged-in user and display them
+    async function fetchAndDisplayBots() {
+        const userId = localStorage.getItem('userId');
+        if (!userId) {
+            console.error("No user ID found, cannot fetch bots.");
+            return;
+        }
+
         try {
-            const response = await fetch('/api/admin/users');
+            const response = await fetch(`/api/users/${userId}/bots`);
             if (response.ok) {
-                const users = await response.json();
-                console.log("Users received:", users); // DEBUG
-                userListDiv.innerHTML = ''; 
-                if (users.length === 0 && noUsersMessage) {
-                    noUsersMessage.style.display = 'block';
+                const bots = await response.json();
+                botsListContainer.innerHTML = ''; 
+                if (bots.length === 0 && noBotsMessage) {
+                    noBotsMessage.classList.remove('hidden');
+                    botsListContainer.appendChild(noBotsMessage);
+                } else if (noBotsMessage) {
+                    noBotsMessage.classList.add('hidden');
                 }
-                users.forEach(user => renderUser(user));
-            } else {
-                console.error("Failed to fetch users. Status:", response.status); // DEBUG
+                bots.forEach(bot => renderBot(bot));
             }
         } catch (error) {
-            console.error('Failed to fetch users:', error);
+            console.error('Error fetching bots:', error);
         }
     }
 
     // --- Event Listeners & Initial Load ---
-    if (createUserForm) {
-        console.log("Create user form found. Attaching event listener."); // DEBUG
-        createUserForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            console.log("Create User form submitted."); // DEBUG
 
-            const emailInput = document.getElementById('user-email');
-            const passwordInput = document.getElementById('user-password');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', () => { 
+            localStorage.removeItem('userId'); // Clear the user ID on logout
+            window.location.href = '/'; 
+        });
+    }
 
+    if (createBotButton) {
+        createBotButton.addEventListener('click', () => { addBotModal.classList.remove('hidden'); });
+    }
+
+    if (cancelButton) {
+        cancelButton.addEventListener('click', () => {
+            addBotModal.classList.add('hidden');
+        });
+    }
+
+    if (addBotForm) {
+        addBotForm.addEventListener('submit', async (event) => {
+            event.preventDefault(); 
+            
+            const bot_token = document.getElementById('bot-token').value;
+            const wallet_address = document.getElementById('wallet-address').value;
+            const userId = localStorage.getItem('userId');
+
+            if (!userId) {
+                alert('Error: Not logged in. Please log in again.');
+                return;
+            }
+            
             try {
-                const response = await fetch('/api/admin/users', {
+                const response = await fetch('/api/bots', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: emailInput.value,
-                        password: passwordInput.value
-                    })
+                    body: JSON.stringify({ bot_token, wallet_address, userId })
                 });
 
                 if (response.ok) {
-                    const newUser = await response.json();
-                    renderUser(newUser);
-                    createUserForm.reset();
+                    const newBot = await response.json();
+                    renderBot(newBot);
+                    addBotModal.classList.add('hidden');
+                    addBotForm.reset();
                 } else {
                     const error = await response.json();
-                    alert(`Error: ${error.message}`);
-                    console.error("Error creating user:", error.message); // DEBUG
+                    alert(`Failed to create bot: ${error.message}`);
                 }
             } catch (error) {
-                console.error("A network error occurred while creating user:", error); // DEBUG
+                console.error('Error creating bot:', error);
             }
         });
-    } else {
-        console.error("Create user form not found!"); // DEBUG
     }
 
-    // Load all users when the page opens
-    fetchAndDisplayUsers();
+    fetchAndDisplayBots();
 });
