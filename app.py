@@ -214,6 +214,17 @@ def get_bot_orders(bot_id):
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
 
+
+
+@app.route('/api/admin/users/<user_id>', methods=['GET'])
+def get_user_details(user_id):
+    """Gets all details for a single user."""
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify(user.to_dict())
+
+
 # --- PAGE SERVING ROUTES ---
 @app.route('/')
 def serve_login_page(): return send_from_directory('.', 'index.html')
@@ -229,3 +240,7 @@ def serve_admin_login_page(): return send_from_directory('.', 'admin.html')
 def serve_admin_dashboard(): return send_from_directory('.', 'admin_dashboard.html')
 @app.route('/<path:path>')
 def serve_static_files(path): return send_from_directory('.', path)
+@app.route('/admin/users/<user_id>')
+def serve_user_details_page(user_id):
+    """Serves the page showing details for a single user."""
+    return send_from_directory('.', 'admin_user_details.html')

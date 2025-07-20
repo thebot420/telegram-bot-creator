@@ -451,3 +451,20 @@ button:active {
     color: #a0b0b9;
     font-size: 0.9rem;
 }
+
+
+
+
+/* --- Clickable User Item Styles --- */
+.user-item.clickable {
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.user-item.clickable:hover {
+    background-color: #3e4f5a;
+}
+.user-info-link {
+    text-decoration: none;
+    color: inherit;
+    flex-grow: 1; /* Makes the link area fill the space */
+}

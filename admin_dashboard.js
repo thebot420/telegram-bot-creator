@@ -12,44 +12,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Functions ---
-
-    // Replace the old renderUser function with this one
     function renderUser(user) {
-    if (noUsersMessage) {
-        noUsersMessage.style.display = 'none';
+        if (noUsersMessage) {
+            noUsersMessage.style.display = 'none';
+        }
+
+        const userItem = document.createElement('div');
+        userItem.className = 'user-item clickable';
+        
+        userItem.innerHTML = `
+            <a href="/admin/users/${user.id}" class="user-info-link">
+                <div class="user-info">
+                    <span class="user-email">${user.email}</span>
+                    <span class="user-bot-count">${user.bots.length} bots</span>
+                </div>
+            </a>
+            <button class="delete-btn" data-id="${user.id}">Delete</button>
+        `;
+
+        // Add click event listener for the delete button
+        const deleteButton = userItem.querySelector('.delete-btn');
+        deleteButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            if (confirm(`Are you sure you want to delete the user ${user.email}? All of their bots will also be deleted.`)) {
+                const response = await fetch(`/api/admin/users/${user.id}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    userItem.remove();
+                } else {
+                    alert('Failed to delete user.');
+                }
+            }
+        });
+
+        userListDiv.appendChild(userItem);
     }
 
-    const userItem = document.createElement('div');
-    userItem.className = 'user-item';
-    userItem.innerHTML = `
-        <div class="user-info">
-            <span class="user-email">${user.email}</span>
-            <span class="user-bot-count">${user.bots.length} bots</span>
-        </div>
-        <button class="delete-btn" data-id="${user.id}">Delete</button>
-    `;
-
-    // Add click event listener for the new delete button
-    const deleteButton = userItem.querySelector('.delete-btn');
-    deleteButton.addEventListener('click', async () => {
-        if (confirm(`Are you sure you want to delete the user ${user.email}? All of their bots will also be deleted.`)) {
-            const response = await fetch(`/api/admin/users/${user.id}`, {
-                method: 'DELETE'
-            });
-            if (response.ok) {
-                userItem.remove(); // Remove the user from the list on the page
-            } else {
-                alert('Failed to delete user.');
-            }
-        }
-    });
-
-    userListDiv.appendChild(userItem);
-}
-
-
-
-    
     async function fetchAndDisplayUsers() {
         try {
             const response = await fetch('/api/admin/users');
