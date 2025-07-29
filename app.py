@@ -18,8 +18,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8i01_user:LJRInIIrol0HJGVizne7mRpmgVvtFXU8@dpg-d242ac9r0fns73ampqa0-a/bot_database_8i01'
+# --- YOUR DATABASE URL IS INCLUDED ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -52,27 +52,42 @@ class Bot(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     token = db.Column(db.String(100), unique=True, nullable=False)
     wallet = db.Column(db.String(100), nullable=False)
+    welcome_message = db.Column(db.String(1024), default="Welcome to my shop!")
     categories = db.relationship('Category', backref='bot', lazy=True, cascade="all, delete-orphan")
     orders = db.relationship('Order', backref='bot', lazy=True, cascade="all, delete-orphan")
     user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'token': self.token, 'wallet': self.wallet, 'categories': [c.to_dict() for c in self.categories], 'orders': [o.to_dict() for o in self.orders]}
+    def to_dict(self): 
+        return {
+            'id': self.id, 'token': self.token, 'wallet': self.wallet, 
+            'welcome_message': self.welcome_message,
+            'categories': [c.to_dict() for c in self.categories if c.parent_id is None], 
+            'orders': [o.to_dict() for o in self.orders]
+        }
     def to_dict_simple(self): return {'id': self.id, 'token_snippet': f"{self.token[:6]}..."}
 
 class Category(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
+    parent_id = db.Column(db.String(36), db.ForeignKey('category.id'), nullable=True)
+    sub_categories = db.relationship('Category', backref=db.backref('parent', remote_side=[id]), cascade="all, delete-orphan")
     products = db.relationship('Product', backref='category', lazy=True, cascade="all, delete-orphan")
-    def to_dict(self): return {'id': self.id, 'name': self.name, 'products': [p.to_dict() for p in self.products]}
+    def to_dict(self): 
+        return {
+            'id': self.id, 'name': self.name, 'parent_id': self.parent_id,
+            'sub_categories': [sc.to_dict() for sc in self.sub_categories],
+            'products': [p.to_dict() for p in self.products]
+        }
 
 class Product(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False)
     price = db.Column(db.Float, nullable=False)
+    unit = db.Column(db.String(20), default='item')
     image_url = db.Column(db.String(500), nullable=True)
     video_url = db.Column(db.String(500), nullable=True)
     category_id = db.Column(db.String(36), db.ForeignKey('category.id'), nullable=False)
-    def to_dict(self): return {'id': self.id, 'name': self.name, 'price': self.price, 'image_url': self.image_url, 'video_url': self.video_url}
+    def to_dict(self): return {'id': self.id, 'name': self.name, 'price': self.price, 'unit': self.unit, 'image_url': self.image_url, 'video_url': self.video_url}
 
 class Order(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -95,84 +110,9 @@ async def setup_bot_webhook(bot_token):
     except Exception as e:
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
-def execute_payout(order):
-    logging.info(f"--- Initiating payout for order {order.id} ---")
-    seller_wallet = order.bot.owner.wallet
-    payout_amount = order.price * 0.99
-    payout_currency = "usdttrc20"
-    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-    payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
-    response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
-    if response.ok:
-        logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
-        order.payout_status = 'paid'
-        db.session.commit()
-    else:
-        logging.error(f"--- ERROR: NOWPayments payout failed for order {order.id}. Response: {response.text} ---")
-        order.payout_status = 'failed'
-        db.session.commit()
-
 async def handle_telegram_update(bot_token, update_data):
-    logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
-    bot = telegram.Bot(token=bot_token)
-    update = telegram.Update.de_json(update_data, bot)
-    with app.app_context():
-        bot_data = Bot.query.filter_by(token=bot_token).first()
-        if not bot_data or not bot_data.owner.is_active: 
-            logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
-            return
-        if update.callback_query:
-            query = update.callback_query
-            chat_id = query.message.chat_id
-            data = query.data
-            await query.answer()
-            action, item_id = data.split(':')
-            if action == 'view_category':
-                category = db.session.get(Category, item_id)
-                if not category or not category.products:
-                    await bot.send_message(chat_id=chat_id, text=f"No products found in {category.name}.")
-                    return
-                for product in category.products:
-                    caption = f"{product.name}\nPrice: {product.price}"
-                    keyboard = [[InlineKeyboardButton(f"Buy {product.name}", callback_data=f"buy_product:{product.id}")]]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    if product.image_url:
-                        await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup)
-                    else:
-                        await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
-            elif action == 'buy_product':
-                product = db.session.get(Product, item_id)
-                if product:
-                    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
-                    db.session.add(new_order)
-                    db.session.commit()
-                    if not NOWPAYMENTS_API_KEY:
-                        logging.error("NOWPayments API key is not set.")
-                        await bot.send_message(chat_id=chat_id, text="Sorry, the payment system is not configured.")
-                        return
-                    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-                    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
-                    try:
-                        response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-                        if response.ok:
-                            payment_info = response.json()
-                            invoice_url = payment_info.get('invoice_url')
-                            reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
-                            await bot.send_message(chat_id=chat_id, text=reply_text)
-                        else:
-                            logging.error(f"NOWPayments error creating invoice: {response.text}")
-                            await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment.")
-                    except Exception as e:
-                        logging.error(f"Exception calling NOWPayments: {e}")
-                        await bot.send_message(chat_id=chat_id, text="A critical error occurred.")
-        elif update.message and update.message.text:
-            chat_id = update.message.chat_id
-            if not bot_data.categories:
-                await bot.send_message(chat_id=chat_id, text="This shop is not set up yet.")
-                return
-            keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in bot_data.categories]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
+    # This will be completely rebuilt in the final step
+    pass
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -375,12 +315,22 @@ def get_bot_details(bot_id):
     if bot: return jsonify(bot.to_dict())
     return jsonify({'message': 'Bot not found'}), 404
 
+@app.route('/api/bots/<bot_id>/welcome-message', methods=['POST'])
+def update_welcome_message(bot_id):
+    bot = db.session.get(Bot, bot_id)
+    if not bot: return jsonify({'message': 'Bot not found'}), 404
+    data = request.get_json()
+    bot.welcome_message = data.get('message', '')
+    db.session.commit()
+    return jsonify({'message': 'Welcome message updated successfully.'}), 200
+
 @app.route('/api/bots/<bot_id>/categories', methods=['POST'])
 def create_category(bot_id):
     bot = db.session.get(Bot, bot_id)
     if not bot: return jsonify({'message': 'Bot not found'}), 404
     data = request.get_json()
-    new_category = Category(name=data.get('name'), bot_id=bot.id)
+    parent_id = data.get('parent_id')
+    new_category = Category(name=data.get('name'), bot_id=bot.id, parent_id=parent_id)
     db.session.add(new_category)
     db.session.commit()
     return jsonify(new_category.to_dict()), 201
@@ -399,7 +349,7 @@ def add_product_to_bot(bot_id):
     category_id = data.get('category_id')
     category = db.session.get(Category, category_id)
     if not category or category.bot_id != bot_id: return jsonify({'message': 'Category not found or does not belong to this bot'}), 404
-    new_product = Product(name=data.get('name'), price=float(data.get('price')), image_url=data.get('image_url'), video_url=data.get('video_url'), category_id=category.id)
+    new_product = Product(name=data.get('name'), price=float(data.get('price')), unit=data.get('unit'), image_url=data.get('image_url'), video_url=data.get('video_url'), category_id=category.id)
     db.session.add(new_product)
     db.session.commit()
     return jsonify(new_product.to_dict()), 201
