@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL IS INCLUDED ---
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_987h_user:8cqDhZWx6ImRxuIMEnLLXKbFZKTf4f4I@dpg-d24bhlili9vc73cjdiig-a/bot_database_987h'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -28,7 +28,7 @@ SERVER_URL = "https://telegram-bot-creator.onrender.com"
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
-# --- Helper function to run async code ---
+# --- Helper function to run async code robustly ---
 def run_async(coroutine):
     try:
         loop = asyncio.get_running_loop()
@@ -110,9 +110,97 @@ async def setup_bot_webhook(bot_token):
     except Exception as e:
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
-async def handle_telegram_update(bot_token, update_data):
-    # This will be completely rebuilt in the final step
+def execute_payout(order):
+    # This function remains correct for the future
     pass
+
+# --- NEW: Completely Rebuilt Telegram Handler ---
+async def handle_telegram_update(bot_token, update_data):
+    logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
+    bot = telegram.Bot(token=bot_token)
+    update = telegram.Update.de_json(update_data, bot)
+    
+    with app.app_context():
+        bot_data = Bot.query.filter_by(token=bot_token).first()
+        
+        if not bot_data or not bot_data.owner.is_active: 
+            logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
+            return
+
+        # --- Case 1: A button was pressed (CallbackQuery) ---
+        if update.callback_query:
+            query = update.callback_query
+            chat_id = query.message.chat_id
+            data = query.data
+            await query.answer()
+            
+            # Main Menu Navigation
+            if data == 'main_menu':
+                keyboard = [
+                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                    [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
+                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                    [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
+                    [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
+                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
+                return
+
+            # Action-based navigation (e.g., "browse_products", "view_category:ID")
+            parts = data.split(':')
+            action = parts[0]
+            item_id = parts[1] if len(parts) > 1 else None
+
+            if action == 'browse_products':
+                main_categories = [c for c in bot_data.categories if c.parent_id is None]
+                if not main_categories:
+                    await query.edit_message_text(text="This shop has no categories yet.")
+                    return
+                keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in main_categories]
+                keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text="Please select a category:", reply_markup=reply_markup)
+
+            elif action == 'view_category':
+                category = db.session.get(Category, item_id)
+                if not category: return
+                
+                if category.sub_categories:
+                    keyboard = [[InlineKeyboardButton(sc.name, callback_data=f"view_category:{sc.id}")] for sc in category.sub_categories]
+                    back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
+                    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await query.edit_message_text(text=f"Sub-categories in {category.name}:", reply_markup=reply_markup)
+                elif category.products:
+                    await query.edit_message_text(text=f"Products in {category.name}:")
+                    for product in category.products:
+                        caption = f"**{product.name}**\nPrice: {product.price} / {product.unit}"
+                        keyboard = [[InlineKeyboardButton("🛒 Add to Cart", callback_data=f"add_cart:{product.id}:1")]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        if product.image_url:
+                            await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
+                        else:
+                            await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+                    back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
+                    await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
+                else:
+                    await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
+
+        # --- Case 2: A text message was sent (e.g., /start) ---
+        elif update.message and update.message.text:
+            chat_id = update.message.chat_id
+            keyboard = [
+                [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
+                [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
+                [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
+                [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await bot.send_message(chat_id=chat_id, text=bot_data.welcome_message, reply_markup=reply_markup)
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
