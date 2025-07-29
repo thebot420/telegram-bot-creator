@@ -25,8 +25,9 @@ db = SQLAlchemy(app)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
-NOWPAYMENTS_API_KEY = os.environ.get('318HGSH-HHY4EKD-M83MZFY-1Z1VCBM')
-NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('+IZhsLc/T6x2NtJNGmqkkScZNRLAieZW')
+# --- CORRECTED: Reads the environment variable NAME, not the value itself ---
+NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
+NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
 # --- Helper function to run async code robustly ---
 def run_async(coroutine):
