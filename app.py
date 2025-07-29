@@ -18,15 +18,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
+# --- YOUR CORRECT DATABASE URL IS INCLUDED ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_4xww_user:ZvtsS6mD0QRjPVKEH2w83fcBpeMonpnM@dpg-d1uifimmcj7s73eifvcg-a/bot_database_4xww'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
-NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
-NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
+NOWPAYMENTS_API_KEY = os.environ.get('318HGSH-HHY4EKD-M83MZFY-1Z1VCBM')
+NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('+IZhsLc/T6x2NtJNGmqkkScZNRLAieZW')
 
 # --- Helper function to run async code robustly ---
 def run_async(coroutine):
