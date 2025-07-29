@@ -1,4 +1,4 @@
-
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -26,31 +26,42 @@
                 <a href="#" id="view-orders-link" class="btn-secondary">View Orders</a>
             </div>
 
-            <!-- NEW: Section to manage categories -->
+            <!-- NEW: Section for Welcome Message -->
             <div class="content-section">
-                <h3>Manage Categories</h3>
-                <form id="add-category-form">
+                <h3>Bot Welcome Message</h3>
+                <form id="welcome-message-form">
                     <div class="input-group">
-                        <label for="category-name">New Category Name</label>
-                        <input type="text" id="category-name" required placeholder="e.g., Clothing, Services">
+                        <label for="welcome-message">This is the first message customers see when they start your bot.</label>
+                        <textarea id="welcome-message" rows="4" placeholder="e.g., Welcome to my shop! Browse our products below."></textarea>
                     </div>
-                    <button type="submit" class="btn-primary">Add Category</button>
+                    <button type="submit" class="btn-primary">Save Message</button>
                 </form>
-                <div id="category-list">
-                    <!-- Categories will be dynamically added here -->
-                    <p id="no-categories-message">No categories created yet.</p>
-                </div>
             </div>
 
-            <!-- MODIFIED: Section to Add New Products -->
+            <!-- NEW: Upgraded Category Management -->
+            <div class="content-section">
+                <h3>Manage Categories</h3>
+                <div id="category-manager">
+                    <!-- Categories and sub-categories will be dynamically rendered here -->
+                    <p id="no-categories-message">No categories created yet.</p>
+                </div>
+                <form id="add-main-category-form">
+                    <div class="input-group">
+                        <label for="main-category-name">New Main Category Name</label>
+                        <input type="text" id="main-category-name" required placeholder="e.g., Clothing">
+                    </div>
+                    <button type="submit" class="btn-primary">Add Main Category</button>
+                </form>
+            </div>
+
+            <!-- MODIFIED: Upgraded Product Management -->
             <div class="content-section">
                 <h3>Add New Product</h3>
                 <form id="add-product-form">
-                    <!-- NEW: Category selection dropdown -->
                     <div class="input-group">
-                        <label for="product-category">Category</label>
+                        <label for="product-category">Category / Sub-Category</label>
                         <select id="product-category" required>
-                            <option value="">-- Select a Category --</option>
+                            <option value="">-- First, create a category --</option>
                         </select>
                     </div>
                     <div class="input-group">
@@ -59,27 +70,19 @@
                     </div>
                     <div class="input-group">
                         <label for="product-price">Price</label>
-                        <input type="number" step="any" id="product-price" required placeholder="e.g., 0.005">
+                        <input type="number" step="any" id="product-price" required placeholder="e.g., 19.99">
                     </div>
-                    <!-- NEW: Image and Video URL fields -->
+                    <!-- NEW: Unit of Measurement -->
+                    <div class="input-group">
+                        <label for="product-unit">Unit of Measurement</label>
+                        <input type="text" id="product-unit" required value="item" placeholder="e.g., item, gram, ml">
+                    </div>
                     <div class="input-group">
                         <label for="product-image-url">Image URL (Optional)</label>
                         <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
                     </div>
-                    <div class="input-group">
-                        <label for="product-video-url">Video URL (Optional)</label>
-                        <input type="url" id="product-video-url" placeholder="https://youtube.com/watch?v=...">
-                    </div>
                     <button type="submit" class="btn-primary">Add Product</button>
                 </form>
-            </div>
-
-            <!-- This section will now be populated by the JS -->
-            <div class="content-section">
-                <h3>Your Products</h3>
-                <div id="product-list-display">
-                    <!-- Products will be displayed here by category -->
-                </div>
             </div>
         </div>
     </main>

@@ -678,3 +678,58 @@ select {
     font-weight: 700;
     color: #ffffff;
 }
+
+
+/* --- Advanced Category Manager Styles --- */
+.category-node {
+    background-color: #1e2a33;
+    border: 1px solid #445;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    padding: 1rem;
+}
+
+.category-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.sub-category-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #2a3b45;
+}
+
+.sub-category-form input {
+    flex-grow: 1;
+    background-color: #2a3b45;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+}
+
+.sub-category-form button {
+    background-color: #00aaff;
+    border: none;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+textarea {
+    width: 100%;
+    padding: 0.8rem 1rem;
+    border: 1px solid #445;
+    border-radius: 8px;
+    box-sizing: border-box;
+    background-color: #1e2a33;
+    color: #e0e0e0;
+    font-size: 1rem;
+    font-family: 'Poppins', sans-serif;
+    resize: vertical;
+}
