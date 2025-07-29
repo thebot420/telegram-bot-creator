@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- App & DB Initialization ---
 app = Flask(__name__)
 # --- YOUR CORRECT DATABASE URL IS INCLUDED ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_4xww_user:ZvtsS6mD0QRjPVKEH2w83fcBpeMonpnM@dpg-d1uifimmcj7s73eifvcg-a/bot_database_4xww'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8i01_user:LJRInIIrol0HJGVizne7mRpmgVvtFXU8@dpg-d242ac9r0fns73ampqa0-a/bot_database_8i01'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
