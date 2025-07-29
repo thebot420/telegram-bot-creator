@@ -18,18 +18,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- YOUR CORRECT DATABASE URL IS INCLUDED ---
+# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8i01_user:LJRInIIrol0HJGVizne7mRpmgVvtFXU8@dpg-d242ac9r0fns73ampqa0-a/bot_database_8i01'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
-# --- CORRECTED: Reads the environment variable NAME, not the value itself ---
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
-# --- Helper function to run async code robustly ---
+# --- Helper function to run async code ---
 def run_async(coroutine):
     try:
         loop = asyncio.get_running_loop()
@@ -104,7 +103,7 @@ def execute_payout(order):
     headers = {'x-api-key': NOWPAYMENTS_API_KEY}
     payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
     response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
-    if response.status_code == 201:
+    if response.ok:
         logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
         order.payout_status = 'paid'
         db.session.commit()
@@ -155,7 +154,7 @@ async def handle_telegram_update(bot_token, update_data):
                     payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
                     try:
                         response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-                        if response.status_code == 201:
+                        if response.ok:
                             payment_info = response.json()
                             invoice_url = payment_info.get('invoice_url')
                             reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
@@ -173,7 +172,7 @@ async def handle_telegram_update(bot_token, update_data):
                 return
             keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in bot_data.categories]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await bot.send_message(chat_id=chat_id, text="Welcome! Please select a category:", reply_markup=reply_markup)
+            await bot.send_message(chat_id=chat_id, text="Welcome to the shop! Please select a category:", reply_markup=reply_markup)
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -305,7 +304,7 @@ def create_payment(product_id):
     headers = {'x-api-key': NOWPAYMENTS_API_KEY}
     payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
     response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-    if response.status_code == 201:
+    if response.ok:
         payment_data = response.json()
         return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
     else:
