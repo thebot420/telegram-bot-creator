@@ -18,8 +18,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- App & DB Initialization ---
 app = Flask(__name__)
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_4xww_user:ZvtsS6mD0QRjPVKEH2w83fcBpeMonpnM@dpg-d1uifimmcj7s73eifvcg-a/bot_database_4xww'
+# --- YOUR DATABASE URL HAS BEEN INCLUDED ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_8upb_user:G5AahH4CZhhH0M7qom9W8kTKatpHY7yM@dpg-d1ugkjer433s73eo8dp0-a/bot_database_8upb'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -80,10 +80,11 @@ class Order(db.Model):
     price = db.Column(db.Float, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     status = db.Column(db.String(20), default='pending', nullable=False)
+    payout_status = db.Column(db.String(20), default='unpaid', nullable=False)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
     def to_dict(self): return {'id': self.id, 'product_name': self.product_name, 'price': self.price, 'timestamp': self.timestamp.isoformat(), 'status': self.status}
 
-# --- Telegram Bot Functions (Async) ---
+# --- Telegram & Payment Functions ---
 async def setup_bot_webhook(bot_token):
     logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
@@ -93,6 +94,23 @@ async def setup_bot_webhook(bot_token):
         logging.info(f"--- SUCCESS: Webhook set successfully for {bot_token[:10]}... ---")
     except Exception as e:
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
+
+def execute_payout(order):
+    logging.info(f"--- Initiating payout for order {order.id} ---")
+    seller_wallet = order.bot.owner.wallet
+    payout_amount = order.price * 0.99
+    payout_currency = "usdttrc20"
+    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+    payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
+    response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
+    if response.status_code == 201:
+        logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
+        order.payout_status = 'paid'
+        db.session.commit()
+    else:
+        logging.error(f"--- ERROR: NOWPayments payout failed for order {order.id}. Response: {response.text} ---")
+        order.payout_status = 'failed'
+        db.session.commit()
 
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
@@ -125,19 +143,27 @@ async def handle_telegram_update(bot_token, update_data):
             elif action == 'buy_product':
                 product = db.session.get(Product, item_id)
                 if product:
-                    api_url = f"{SERVER_URL}/api/orders/{product.id}/create-payment"
+                    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
+                    db.session.add(new_order)
+                    db.session.commit()
+                    if not NOWPAYMENTS_API_KEY:
+                        logging.error("NOWPayments API key is not set.")
+                        await bot.send_message(chat_id=chat_id, text="Sorry, the payment system is not configured.")
+                        return
+                    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+                    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
                     try:
-                        response = requests.post(api_url)
+                        response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
                         if response.status_code == 201:
                             payment_info = response.json()
                             invoice_url = payment_info.get('invoice_url')
                             reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
                             await bot.send_message(chat_id=chat_id, text=reply_text)
                         else:
-                            logging.error(f"API call to create payment failed: {response.text}")
+                            logging.error(f"NOWPayments error creating invoice: {response.text}")
                             await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment.")
                     except Exception as e:
-                        logging.error(f"Exception during internal API call: {e}")
+                        logging.error(f"Exception calling NOWPayments: {e}")
                         await bot.send_message(chat_id=chat_id, text="A critical error occurred.")
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
@@ -147,7 +173,6 @@ async def handle_telegram_update(bot_token, update_data):
             keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in bot_data.categories]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text="Welcome! Please select a category:", reply_markup=reply_markup)
-        logging.info(f"--- Successfully processed update for chat ID {chat_id} ---")
 
 # --- API ROUTES ---
 @app.route('/api/login', methods=['POST'])
@@ -303,10 +328,11 @@ def nowpayments_webhook():
     order_id = data.get('order_id')
     payment_status = data.get('payment_status')
     order = db.session.get(Order, order_id)
-    if order and payment_status == 'finished':
+    if order and payment_status == 'finished' and order.payout_status == 'unpaid':
         order.status = 'paid'
         db.session.commit()
         logging.info(f"Order {order_id} marked as paid.")
+        execute_payout(order)
     return "ok", 200
 
 @app.route('/api/bots', methods=['POST'])

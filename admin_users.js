@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE' });
                 if (response.ok) {
                     userItem.remove();
-                } else {
+                } else {á0P-.9 8H,.GNO7MIJFHBU6YNDG5VXTB4FRZCBE
                     alert('Failed to delete user.');
                 }
             }
