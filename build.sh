@@ -1,1 +1,1 @@
-python create_tables.py
+python -m app.create_db
