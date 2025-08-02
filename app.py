@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template
+flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
@@ -17,17 +17,17 @@ import json
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
-# We tell Flask that the frontend files are in the 'static' and 'templates' folders
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # --- Configuration ---
-# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'YOUR_DATABASE_URL_HERE'
+# --- YOUR CORRECT DATABASE URL IS INCLUDED ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_tira_user:cWfY90Zm0AcERetHuYr1JcKRQd7NUtJ5@dpg-d2790u95pdvs73co6drg-a/bot_database_tira'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
+# --- CORRECTED: Reads the environment variable NAME, not the value itself ---
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
@@ -115,14 +115,17 @@ async def setup_bot_webhook(bot_token):
 
 def execute_payout(order):
     logging.info(f"--- Initiating payout for order {order.id} ---")
-    seller_wallet = order.bot.owner.wallet
-    payout_amount = order.price * 0.99
-    payout_currency = "usdttrc20"
-    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-    payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
-    response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
     with app.app_context():
         order_to_update = db.session.get(Order, order.id)
+        if not order_to_update: return
+
+        seller_wallet = order_to_update.bot.owner.wallet
+        payout_amount = order_to_update.price * 0.99
+        payout_currency = "usdttrc20"
+        headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+        payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
+        response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
+        
         if response.ok:
             logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
             order_to_update.payout_status = 'paid'
@@ -135,11 +138,14 @@ async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
+    
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
+        
         if not bot_data or not bot_data.owner.is_active: 
             logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
             return
+
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
