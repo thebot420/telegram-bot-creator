@@ -399,3 +399,21 @@ def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
+
+# Add this entire function to the bottom of your app/routes/api_routes.py file
+
+@api.route('/debug-paths')
+def debug_paths():
+    """A special route to debug file paths on the live server."""
+    # Get the application context to inspect its properties
+    app = current_app._get_current_object()
+    
+    # Build a dictionary of important paths
+    paths = {
+        "app.root_path": app.root_path,
+        "app.template_folder": app.template_folder,
+        "expected_template_path": os.path.join(app.root_path, app.template_folder),
+        "index.html_exists": os.path.exists(os.path.join(app.root_path, app.template_folder, 'index.html'))
+    }
+    
+    return jsonify(paths)
