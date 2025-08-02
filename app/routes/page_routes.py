@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template
 
 # This Blueprint organizes all the routes that serve HTML pages.
-# The main app (__init__.py) tells this Blueprint where to find the 'templates' folder.
+# The main app (__init__.py) is now responsible for knowing where the 'templates' folder is.
 pages = Blueprint('pages', __name__)
 
 @pages.route('/')
