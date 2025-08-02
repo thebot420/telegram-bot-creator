@@ -201,7 +201,6 @@ async def handle_telegram_update(bot_token, update_data):
             elif action == 'add_cart': # Placeholder for future cart logic
                 await bot.send_message(chat_id=chat_id, text="This feature is coming soon!")
 
-
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             keyboard = [
@@ -331,6 +330,26 @@ def get_user_dashboard_stats(user_id):
     recent_orders = [order.to_dict() for order in recent_orders_query]
     stats = {'total_sales': round(total_sales, 2), 'total_orders': total_orders, 'recent_orders': recent_orders}
     return jsonify(stats)
+
+@app.route('/api/orders/<product_id>/create-payment', methods=['POST'])
+def create_payment(product_id):
+    product = db.session.get(Product, product_id)
+    if not product: return jsonify({'message': 'Product not found'}), 404
+    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
+    db.session.add(new_order)
+    db.session.commit()
+    if not NOWPAYMENTS_API_KEY:
+        logging.error("NOWPayments API key is not set.")
+        return jsonify({'message': 'Payment processor is not configured.'}), 500
+    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
+    response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
+    if response.ok:
+        payment_data = response.json()
+        return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
+    else:
+        logging.error(f"NOWPayments error: {response.text}")
+        return jsonify({'message': 'Failed to create payment invoice.'}), 500
 
 @app.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():
