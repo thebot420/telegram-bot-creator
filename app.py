@@ -22,7 +22,7 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # --- Configuration ---
 # --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'YOUR_DATABASE_URL_HERE'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_tira_user:cWfY90Zm0AcERetHuYr1JcKRQd7NUtJ5@dpg-d2790u95pdvs73co6drg-a/bot_database_tira'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
