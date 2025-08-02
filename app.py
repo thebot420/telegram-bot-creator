@@ -1,4 +1,4 @@
-flask import Flask, request, jsonify, send_from_directory, render_template
+from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
@@ -17,17 +17,17 @@ import json
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- App & DB Initialization ---
+# We tell Flask that the frontend files are in the 'static' and 'templates' folders
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # --- Configuration ---
-# --- YOUR CORRECT DATABASE URL IS INCLUDED ---
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://bot_database_tira_user:cWfY90Zm0AcERetHuYr1JcKRQd7NUtJ5@dpg-d2790u95pdvs73co6drg-a/bot_database_tira'
+# --- IMPORTANT: PASTE YOUR RENDER DATABASE URL HERE ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'YOUR_DATABASE_URL_HERE'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
-# --- CORRECTED: Reads the environment variable NAME, not the value itself ---
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
@@ -114,18 +114,15 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 def execute_payout(order):
-    logging.info(f"--- Initiating payout for order {order.id} ---")
     with app.app_context():
         order_to_update = db.session.get(Order, order.id)
         if not order_to_update: return
-
         seller_wallet = order_to_update.bot.owner.wallet
         payout_amount = order_to_update.price * 0.99
         payout_currency = "usdttrc20"
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
         payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
         response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
-        
         if response.ok:
             logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
             order_to_update.payout_status = 'paid'
@@ -138,14 +135,11 @@ async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
-    
     with app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        
         if not bot_data or not bot_data.owner.is_active: 
             logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
             return
-
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
@@ -203,6 +197,10 @@ async def handle_telegram_update(bot_token, update_data):
                     await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
                 else:
                     await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
+            
+            elif action == 'add_cart': # Placeholder for future cart logic
+                await bot.send_message(chat_id=chat_id, text="This feature is coming soon!")
+
 
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
@@ -333,26 +331,6 @@ def get_user_dashboard_stats(user_id):
     recent_orders = [order.to_dict() for order in recent_orders_query]
     stats = {'total_sales': round(total_sales, 2), 'total_orders': total_orders, 'recent_orders': recent_orders}
     return jsonify(stats)
-
-@app.route('/api/orders/<product_id>/create-payment', methods=['POST'])
-def create_payment(product_id):
-    product = db.session.get(Product, product_id)
-    if not product: return jsonify({'message': 'Product not found'}), 404
-    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
-    db.session.add(new_order)
-    db.session.commit()
-    if not NOWPAYMENTS_API_KEY:
-        logging.error("NOWPayments API key is not set.")
-        return jsonify({'message': 'Payment processor is not configured.'}), 500
-    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
-    response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-    if response.ok:
-        payment_data = response.json()
-        return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
-    else:
-        logging.error(f"NOWPayments error: {response.text}")
-        return jsonify({'message': 'Failed to create payment invoice.'}), 500
 
 @app.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():
