@@ -5,7 +5,15 @@ import os
 db = SQLAlchemy()
 
 def create_app():
-    app = Flask(__name__, instance_relative_config=True)
+    """
+    This is the application factory. It creates and configures the Flask app.
+    """
+    # --- THIS IS THE CRITICAL FIX ---
+    # We are now explicitly telling Flask where to find our frontend files.
+    app = Flask(__name__, 
+                instance_relative_config=True,
+                template_folder='templates', 
+                static_folder='static')
 
     # Configuration
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///bots.db')

@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template
 
 # This Blueprint organizes all the routes that serve HTML pages.
-pages = Blueprint('pages', __name__, template_folder='../../templates', static_folder='../../static')
+# The main app (__init__.py) tells it where to find the 'templates' folder.
+pages = Blueprint('pages', __name__)
 
 @pages.route('/')
 def serve_login_page():
