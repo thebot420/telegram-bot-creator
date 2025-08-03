@@ -11,12 +11,15 @@ import hmac
 import hashlib
 import json
 
+# This Blueprint will handle all our API logic.
 api = Blueprint('api', __name__)
 
+# --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
 NOWPAYMENTS_API_KEY = os.environ.get('NOWPAYMENTS_API_KEY')
 NOWPAYMENTS_IPN_SECRET_KEY = os.environ.get('NOWPAYMENTS_IPN_SECRET_KEY')
 
+# --- Helper function to run async code ---
 def run_async(coroutine):
     try:
         loop = asyncio.get_running_loop()
@@ -25,6 +28,7 @@ def run_async(coroutine):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coroutine)
 
+# --- Telegram & Payment Functions ---
 async def setup_bot_webhook(bot_token):
     logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
@@ -35,28 +39,61 @@ async def setup_bot_webhook(bot_token):
     except Exception as e:
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
+def execute_payout(order):
+    logging.info(f"--- Initiating payout for order {order.id} ---")
+    with current_app.app_context():
+        order_to_update = db.session.get(Order, order.id)
+        if not order_to_update: return
+
+        seller_wallet = order_to_update.bot.owner.wallet
+        payout_amount = order_to_update.price * 0.99
+        payout_currency = "usdttrc20"
+        headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+        payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
+        response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
+        
+        if response.ok:
+            logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
+            order_to_update.payout_status = 'paid'
+        else:
+            logging.error(f"--- ERROR: NOWPayments payout failed for order {order.id}. Response: {response.text} ---")
+            order_to_update.payout_status = 'failed'
+        db.session.commit()
+
 async def handle_telegram_update(bot_token, update_data):
+    logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
+    
     with current_app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        if not bot_data or not bot_data.owner.is_active: return
+        if not bot_data or not bot_data.owner.is_active: 
+            logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
+            return
+        
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
             data = query.data
             await query.answer()
+            
             if data == 'main_menu':
                 keyboard = [
                     [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                    [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
+                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                    [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
+                    [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
                     [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
                 return
+
             parts = data.split(':')
             action = parts[0]
             item_id = parts[1] if len(parts) > 1 else None
+
             if action == 'browse_products':
                 main_categories = [c for c in bot_data.categories if c.parent_id is None]
                 if not main_categories:
@@ -66,9 +103,11 @@ async def handle_telegram_update(bot_token, update_data):
                 keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(text="Please select a category:", reply_markup=reply_markup)
+
             elif action == 'view_category':
                 category = db.session.get(Category, item_id)
                 if not category: return
+                
                 if category.sub_categories:
                     keyboard = [[InlineKeyboardButton(sc.name, callback_data=f"view_category:{sc.id}")] for sc in category.sub_categories]
                     back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
@@ -79,7 +118,7 @@ async def handle_telegram_update(bot_token, update_data):
                     await query.edit_message_text(text=f"Products in {category.name}:")
                     for product in category.products:
                         caption = f"**{product.name}**\nPrice: {product.price} / {product.unit}"
-                        keyboard = [[InlineKeyboardButton("🛒 Add to Cart", callback_data=f"add_cart:{product.id}:1")]]
+                        keyboard = [[InlineKeyboardButton(f"Buy {product.name}", callback_data=f"buy_product:{product.id}")]]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         if product.image_url:
                             await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
@@ -89,15 +128,51 @@ async def handle_telegram_update(bot_token, update_data):
                     await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
                 else:
                     await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
+            
+            # --- THIS IS THE CRITICAL FIX ---
+            elif action == 'buy_product':
+                product = db.session.get(Product, item_id)
+                if product:
+                    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
+                    db.session.add(new_order)
+                    db.session.commit()
+                    
+                    if not NOWPAYMENTS_API_KEY:
+                        logging.error("NOWPayments API key is not set.")
+                        await bot.send_message(chat_id=chat_id, text="Sorry, the payment system is not configured.")
+                        return
+
+                    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+                    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
+                    
+                    try:
+                        response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
+                        if response.ok:
+                            payment_info = response.json()
+                            invoice_url = payment_info.get('invoice_url')
+                            reply_text = f"To complete your purchase of '{product.name}', please use the following secure payment link:\n\n{invoice_url}"
+                            await bot.send_message(chat_id=chat_id, text=reply_text)
+                        else:
+                            logging.error(f"NOWPayments error creating invoice: {response.text}")
+                            await bot.send_message(chat_id=chat_id, text="Sorry, there was an error creating your payment.")
+                    except Exception as e:
+                        logging.error(f"Exception calling NOWPayments: {e}")
+                        await bot.send_message(chat_id=chat_id, text="A critical error occurred.")
+
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             keyboard = [
                 [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
+                [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
+                [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
                 [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text=bot_data.welcome_message, reply_markup=reply_markup)
 
+# --- API ROUTES ---
 @api.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -213,26 +288,6 @@ def get_user_dashboard_stats(user_id):
     recent_orders = [order.to_dict() for order in recent_orders_query]
     stats = {'total_sales': round(total_sales, 2), 'total_orders': total_orders, 'recent_orders': recent_orders}
     return jsonify(stats)
-
-@api.route('/api/orders/<product_id>/create-payment', methods=['POST'])
-def create_payment(product_id):
-    product = db.session.get(Product, product_id)
-    if not product: return jsonify({'message': 'Product not found'}), 404
-    new_order = Order(product_name=product.name, price=product.price, bot_id=product.category.bot_id)
-    db.session.add(new_order)
-    db.session.commit()
-    if not NOWPAYMENTS_API_KEY:
-        logging.error("NOWPayments API key is not set.")
-        return jsonify({'message': 'Payment processor is not configured.'}), 500
-    headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-    payload = {"price_amount": product.price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
-    response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
-    if response.ok:
-        payment_data = response.json()
-        return jsonify({'invoice_url': payment_data.get('invoice_url')}), 201
-    else:
-        logging.error(f"NOWPayments error: {response.text}")
-        return jsonify({'message': 'Failed to create payment invoice.'}), 500
 
 @api.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():

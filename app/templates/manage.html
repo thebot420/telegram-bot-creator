@@ -42,13 +42,13 @@
             <div class="content-section">
                 <h3>Manage Categories</h3>
                 <div id="category-manager">
-                    <!-- Categories and sub-categories will be dynamically rendered here -->
+                    <!-- Categories and sub-categories will be dynamically rendered here by the JS -->
                     <p id="no-categories-message">No categories created yet.</p>
                 </div>
-                <form id="add-main-category-form">
+                <form id="add-main-category-form" class="add-main-category-form">
                     <div class="input-group">
                         <label for="main-category-name">New Main Category Name</label>
-                        <input type="text" id="main-category-name" required placeholder="e.g., Clothing">
+                        <input type="text" id="main-category-name" required placeholder="e.g., Clothing, Electronics">
                     </div>
                     <button type="submit" class="btn-primary">Add Main Category</button>
                 </form>
@@ -72,7 +72,6 @@
                         <label for="product-price">Price</label>
                         <input type="number" step="any" id="product-price" required placeholder="e.g., 19.99">
                     </div>
-                    <!-- NEW: Unit of Measurement -->
                     <div class="input-group">
                         <label for="product-unit">Unit of Measurement</label>
                         <input type="text" id="product-unit" required value="item" placeholder="e.g., item, gram, ml">
@@ -80,6 +79,10 @@
                     <div class="input-group">
                         <label for="product-image-url">Image URL (Optional)</label>
                         <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
+                    </div>
+                    <div class="input-group">
+                        <label for="product-video-url">Video URL (Optional)</label>
+                        <input type="url" id="product-video-url" placeholder="https://youtube.com/watch?v=...">
                     </div>
                     <button type="submit" class="btn-primary">Add Product</button>
                 </form>
