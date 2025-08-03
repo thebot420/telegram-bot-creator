@@ -1,29 +1,71 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Initialize FilePond Uploader ---
-    const inputElement = document.querySelector('input[type="file"]');
-    const pond = FilePond.create(inputElement);
+    console.log("DEBUG: manage.js script has started.");
 
-    // --- THIS IS THE CRITICAL FIX ---
-    // We are now explicitly telling FilePond to send the file
-    // with the field name 'file', which our backend expects.
-    FilePond.setOptions({
-        server: '/api/upload-media',
-        name: 'file', 
-    });
+    // --- Get all necessary elements ---
+    const addProductForm = document.getElementById('add-product-form');
+    console.log("DEBUG: addProductForm element:", addProductForm); // Check if the form is found
 
-    let uploadedFileUrl = null; 
+    // --- Event Listeners ---
+    if (addProductForm) {
+        console.log("DEBUG: Attaching event listener to the product form.");
+        addProductForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log("DEBUG: 'Save Product & Add Pricing' button was clicked.");
 
-    pond.on('processfile', (error, file) => {
-        if (error) {
-            console.error('FilePond server error:', error);
-            return;
-        }
-        const response = JSON.parse(file.serverId);
-        uploadedFileUrl = response.secure_url;
-    });
+            try {
+                const categoryId = document.getElementById('product-category').value;
+                const productName = document.getElementById('product-name').value;
+                const productDesc = document.getElementById('product-description').value;
+                const productUnit = document.getElementById('product-unit').value;
+                const imageUrl = document.getElementById('product-image-url') ? document.getElementById('product-image-url').value : null;
+                const videoUrl = document.getElementById('product-video-url') ? document.getElementById('product-video-url').value : null;
 
+                console.log("DEBUG: Form data collected:", { categoryId, productName });
 
-    // --- Get all other necessary elements ---
+                const productData = {
+                    category_id: categoryId,
+                    name: productName,
+                    description: productDesc,
+                    unit: productUnit,
+                    image_url: uploadedFileUrl || imageUrl, // Use uploaded file first
+                    video_url: videoUrl,
+                };
+
+                console.log("DEBUG: Sending data to server:", productData);
+
+                const response = await fetch(`/api/bots/${botId}/products`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+
+                console.log("DEBUG: Received response from server with status:", response.status);
+
+                if (response.ok) {
+                    const newProduct = await response.json();
+                    console.log("DEBUG: Product created successfully:", newProduct);
+                    addProductForm.reset();
+                    if (window.pond) pond.removeFiles();
+                    uploadedFileUrl = null;
+                    openPriceTierModal(newProduct.id, newProduct.name, []);
+                    loadBotData();
+                } else {
+                    const error = await response.json();
+                    console.error("DEBUG: Server responded with an error:", error.message);
+                    alert(`Failed to add product: ${error.message}`);
+                }
+            } catch (error) {
+                console.error("DEBUG: A critical JavaScript error occurred:", error);
+                alert("A critical error occurred. Please check the console.");
+            }
+        });
+    } else {
+        console.error("DEBUG: CRITICAL ERROR - Could not find the add-product-form!");
+    }
+
+    // --- All other functions from the file go here ---
+    // (I have included the full file content below for simplicity)
+
     const pageTitle = document.getElementById('manage-bot-title');
     const viewOrdersLink = document.getElementById('view-orders-link');
     const welcomeMessageForm = document.getElementById('welcome-message-form');
@@ -31,20 +73,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const categoryManagerDiv = document.getElementById('category-manager');
     const noCategoriesMessage = document.getElementById('no-categories-message');
     const addMainCategoryForm = document.getElementById('add-main-category-form');
-    const addProductForm = document.getElementById('add-product-form');
     const productCategorySelect = document.getElementById('product-category');
     const productListDisplayDiv = document.getElementById('product-list-display');
     const logoutButton = document.getElementById('logout-button');
-    
     const priceTierModal = document.getElementById('price-tier-modal');
     const priceTierTitle = document.getElementById('price-tier-title');
     const existingTiersList = document.getElementById('existing-tiers-list');
     const addPriceTierForm = document.getElementById('add-price-tier-form');
     const closePriceModalButton = document.getElementById('close-price-modal-button');
     let currentProductIdForTiers = null;
-
     const pathParts = window.location.pathname.split('/');
     const botId = pathParts[pathParts.length - 1];
+    let uploadedFileUrl = null;
+
+    // Initialize FilePond if it exists
+    const inputElement = document.querySelector('input[type="file"]');
+    if (window.FilePond && inputElement) {
+        const pond = FilePond.create(inputElement);
+        window.pond = pond; // Make it globally accessible for clearing
+        FilePond.setOptions({
+            server: '/api/upload-media',
+            name: 'file',
+        });
+        pond.on('processfile', (error, file) => {
+            if (error) {
+                console.error('FilePond server error:', error);
+                return;
+            }
+            const response = JSON.parse(file.serverId);
+            uploadedFileUrl = response.secure_url;
+        });
+    }
 
     if (logoutButton) {
         logoutButton.addEventListener('click', () => {
@@ -59,11 +118,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`/api/bots/${botId}`);
             if (!response.ok) return;
             const bot = await response.json();
-            
             pageTitle.textContent = `Manage Bot (...${bot.id.slice(-6)})`;
             if (viewOrdersLink) viewOrdersLink.href = `/orders/${bot.id}`;
             welcomeMessageTextarea.value = bot.welcome_message;
-
             renderCategoryTree(bot.categories);
             renderAllProducts(bot.categories);
         } catch (error) {
@@ -146,7 +203,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const categoryTitle = document.createElement('h4');
         categoryTitle.textContent = category.name;
         categorySection.appendChild(categoryTitle);
-
         category.products.forEach(product => {
             const productItem = document.createElement('div');
             productItem.className = 'product-item-manage';
@@ -165,7 +221,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             categorySection.appendChild(productItem);
         });
-
         category.sub_categories.forEach(subCategory => {
             const subCategoryElements = renderProductsForCategory(subCategory);
             if (subCategoryElements) {
@@ -258,35 +313,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             input.value = '';
             loadBotData();
-        });
-    }
-
-    if (addProductForm) {
-        addProductForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const productData = {
-                category_id: document.getElementById('product-category').value,
-                name: document.getElementById('product-name').value,
-                description: document.getElementById('product-description').value,
-                unit: document.getElementById('product-unit').value,
-                image_url: uploadedFileUrl,
-                video_url: null,
-            };
-            const response = await fetch(`/api/bots/${botId}/products`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(productData)
-            });
-            if (response.ok) {
-                const newProduct = await response.json();
-                addProductForm.reset();
-                pond.removeFiles();
-                uploadedFileUrl = null;
-                openPriceTierModal(newProduct.id, newProduct.name, []);
-                loadBotData();
-            } else {
-                alert('Failed to add product.');
-            }
         });
     }
 
