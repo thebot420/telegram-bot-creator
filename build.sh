@@ -1,1 +1,1 @@
-python create_db.py
+python -c "from app import db; db.create_all()"
