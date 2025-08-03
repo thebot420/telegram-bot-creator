@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from .. import db
-from ..models import User, Bot, Category, Product, Order, PriceTier
+from ..models import User, Bot, Category, Product, Order, PriceTier, Cart, CartItem
 import telegram
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
@@ -10,7 +10,6 @@ import requests
 import hmac
 import hashlib
 import json
-# NEW: Cloudinary imports
 import cloudinary
 import cloudinary.uploader
 
@@ -50,45 +49,59 @@ async def setup_bot_webhook(bot_token):
         logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 def execute_payout(order):
-    # This function remains correct for the future
-    pass
+    with current_app.app_context():
+        order_to_update = db.session.get(Order, order.id)
+        if not order_to_update: return
+        seller_wallet = order_to_update.bot.owner.wallet
+        payout_amount = order_to_update.price * 0.99
+        payout_currency = "usdttrc20"
+        headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+        payload = {"withdrawals": [{"address": seller_wallet, "currency": payout_currency, "amount": payout_amount}]}
+        response = requests.post('https://api.nowpayments.io/v1/payout', headers=headers, json=payload)
+        if response.ok:
+            logging.info(f"--- SUCCESS: Payout for order {order.id} created successfully. ---")
+            order_to_update.payout_status = 'paid'
+        else:
+            logging.error(f"--- ERROR: NOWPayments payout failed for order {order.id}. Response: {response.text} ---")
+            order_to_update.payout_status = 'failed'
+        db.session.commit()
 
+# --- NEW: Completely Rebuilt Telegram Handler ---
 async def handle_telegram_update(bot_token, update_data):
-    # This logic is now correct and stable
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
+    
     with current_app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        if not bot_data or not bot_data.owner.is_active: return
+        if not bot_data or not bot_data.owner.is_active: 
+            return
 
+        # --- Case 1: A button was pressed (CallbackQuery) ---
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
             data = query.data
             await query.answer()
             
-            if data == 'main_menu':
-                keyboard = [
-                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
-                    [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
-                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-                    [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
-                    [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
-                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
-                return
-
             parts = data.split(':')
             action = parts[0]
             item_id = parts[1] if len(parts) > 1 else None
 
-            if action == 'browse_products':
+            # --- Main Menu Navigation ---
+            if action == 'main_menu':
+                keyboard = [
+                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
+
+            # --- Product Browsing ---
+            elif action == 'browse_products':
                 main_categories = [c for c in bot_data.categories if c.parent_id is None]
                 if not main_categories:
-                    await query.edit_message_text(text="This shop has no categories yet.")
+                    await query.edit_message_text(text="This shop has no categories yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
                     return
                 keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in main_categories]
                 keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
@@ -120,27 +133,102 @@ async def handle_telegram_update(bot_token, update_data):
                                 await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
                             else:
                                 await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
-                        except telegram.error.BadRequest as e:
-                            logging.error(f"Telegram BadRequest (likely invalid image URL): {e}. Falling back to text.")
+                        except telegram.error.BadRequest:
                             await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
                     back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
                     await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
                 else:
                     await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
             
+            # --- Shopping Cart Logic ---
             elif action == 'add_cart':
                 price_tier = db.session.get(PriceTier, item_id)
                 if price_tier:
-                    await bot.send_message(chat_id=chat_id, text=f"'{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
+                    cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                    if not cart:
+                        cart = Cart(chat_id=str(chat_id), bot_id=bot_data.id)
+                        db.session.add(cart)
+                        db.session.flush() # Get cart.id before commit
+                    
+                    cart_item = CartItem.query.filter_by(cart_id=cart.id, price_tier_id=price_tier.id).first()
+                    if cart_item:
+                        cart_item.quantity += 1
+                    else:
+                        cart_item = CartItem(cart_id=cart.id, price_tier_id=price_tier.id, quantity=1)
+                        db.session.add(cart_item)
+                    
+                    db.session.commit()
+                    await bot.send_message(chat_id=chat_id, text=f"✅ '{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
 
+            elif action == 'view_cart':
+                cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                if not cart or not cart.items:
+                    await query.edit_message_text(text="Your shopping cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+                    return
+                
+                cart_text = "🛒 **Your Shopping Cart**\n\n"
+                total_price = 0
+                keyboard = []
+                for item in cart.items:
+                    item_total = item.quantity * item.price_tier.price
+                    cart_text += f"- {item.quantity}x {item.price_tier.product.name} ({item.price_tier.label}) - £{item_total:.2f}\n"
+                    total_price += item_total
+                    keyboard.append([InlineKeyboardButton(f"❌ Remove {item.price_tier.label}", callback_data=f"remove_item:{item.id}")])
+                
+                cart_text += f"\n**Total: £{total_price:.2f}**"
+                keyboard.append([InlineKeyboardButton("🗑️ Clear Cart", callback_data=f"clear_cart:{cart.id}")])
+                keyboard.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
+                keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+            elif action == 'remove_item':
+                cart_item = db.session.get(CartItem, item_id)
+                if cart_item:
+                    db.session.delete(cart_item)
+                    db.session.commit()
+                # Refresh the cart view by faking a callback
+                fake_callback_data = {'callback_query': {'data': 'view_cart', 'message': query.message.to_dict(), 'id': query.id}}
+                await handle_telegram_update(bot_token, fake_callback_data)
+            
+            elif action == 'clear_cart':
+                cart = db.session.get(Cart, item_id)
+                if cart:
+                    CartItem.query.filter_by(cart_id=cart.id).delete()
+                    db.session.commit()
+                await query.edit_message_text(text="Your shopping cart has been cleared.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+
+            elif action == 'checkout':
+                cart = db.session.get(Cart, item_id)
+                if not cart or not cart.items:
+                    await query.edit_message_text(text="Your cart is empty. Nothing to checkout.")
+                    return
+                
+                total_price = sum(item.quantity * item.price_tier.price for item in cart.items)
+                order_description = ", ".join([f"{item.quantity}x {item.price_tier.product.name} ({item.price_tier.label})" for item in cart.items])
+
+                new_order = Order(product_name=order_description, price=total_price, bot_id=cart.bot_id)
+                db.session.add(new_order)
+                db.session.commit()
+
+                headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+                payload = {"price_amount": total_price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
+                response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
+                
+                if response.ok:
+                    CartItem.query.filter_by(cart_id=cart.id).delete()
+                    db.session.commit()
+                    payment_data = response.json()
+                    invoice_url = payment_data.get('invoice_url')
+                    await query.edit_message_text(text=f"Thank you! Please complete your payment of £{total_price:.2f} using the secure link below:\n\n{invoice_url}")
+                else:
+                    await query.edit_message_text(text="Sorry, there was an error creating your payment link. Please try again.")
+
+        # --- Case 2: A text message was sent (e.g., /start) ---
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             keyboard = [
                 [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
-                [InlineKeyboardButton("⭐️ Reviews", callback_data="reviews")],
-                [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-                [InlineKeyboardButton("🎫 Support Tickets", callback_data="support")],
-                [InlineKeyboardButton("📞 Contact Us", callback_data="contact")],
                 [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
