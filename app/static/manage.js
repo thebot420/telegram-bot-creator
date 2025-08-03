@@ -1,23 +1,23 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialize FilePond Uploader ---
-    // This turns our simple file input into a powerful drag-and-drop uploader.
     const inputElement = document.querySelector('input[type="file"]');
     const pond = FilePond.create(inputElement);
 
-    // This tells FilePond where to send the uploaded files.
+    // --- THIS IS THE CRITICAL FIX ---
+    // We are now explicitly telling FilePond to send the file
+    // with the field name 'file', which our backend expects.
     FilePond.setOptions({
         server: '/api/upload-media',
+        name: 'file', 
     });
 
-    let uploadedFileUrl = null; // Variable to store the returned Cloudinary URL
+    let uploadedFileUrl = null; 
 
-    // Listen for when a file has been successfully processed by our server
     pond.on('processfile', (error, file) => {
         if (error) {
             console.error('FilePond server error:', error);
             return;
         }
-        // The server's response is stored in file.serverId
         const response = JSON.parse(file.serverId);
         uploadedFileUrl = response.secure_url;
     });
@@ -53,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Main Data Loading Function ---
     async function loadBotData() {
         if (!botId) return;
         try {
@@ -72,7 +71,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Category & Product Rendering ---
     function renderCategoryTree(categories) {
         categoryManagerDiv.innerHTML = '';
         productCategorySelect.innerHTML = '<option value="">-- Select a Category --</option>';
@@ -199,7 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
         priceTierModal.classList.remove('hidden');
     }
 
-    // --- API Call Functions ---
     async function deleteCategory(categoryId, categoryName) {
         if (confirm(`Are you sure you want to delete "${categoryName}" and all its contents?`)) {
             await fetch(`/api/categories/${categoryId}`, { method: 'DELETE' });
@@ -238,7 +235,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Form Event Listeners ---
     if (welcomeMessageForm) {
         welcomeMessageForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -273,8 +269,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: document.getElementById('product-name').value,
                 description: document.getElementById('product-description').value,
                 unit: document.getElementById('product-unit').value,
-                image_url: uploadedFileUrl, // Use the URL from the uploaded file
-                video_url: null, // We can add a separate uploader for this later
+                image_url: uploadedFileUrl,
+                video_url: null,
             };
             const response = await fetch(`/api/bots/${botId}/products`, {
                 method: 'POST',
@@ -284,7 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 const newProduct = await response.json();
                 addProductForm.reset();
-                pond.removeFiles(); // Clear the file uploader
+                pond.removeFiles();
                 uploadedFileUrl = null;
                 openPriceTierModal(newProduct.id, newProduct.name, []);
                 loadBotData();
@@ -333,6 +329,5 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Initial load
     loadBotData();
 });
