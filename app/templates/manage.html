@@ -26,7 +26,7 @@
                 <a href="#" id="view-orders-link" class="btn-secondary">View Orders</a>
             </div>
 
-            <!-- NEW: Section for Welcome Message -->
+            <!-- Welcome Message Section -->
             <div class="content-section">
                 <h3>Bot Welcome Message</h3>
                 <form id="welcome-message-form">
@@ -38,11 +38,10 @@
                 </form>
             </div>
 
-            <!-- NEW: Upgraded Category Management -->
+            <!-- Category Management Section -->
             <div class="content-section">
                 <h3>Manage Categories</h3>
                 <div id="category-manager">
-                    <!-- Categories and sub-categories will be dynamically rendered here by the JS -->
                     <p id="no-categories-message">No categories created yet.</p>
                 </div>
                 <form id="add-main-category-form" class="add-main-category-form">
@@ -54,7 +53,7 @@
                 </form>
             </div>
 
-            <!-- MODIFIED: Upgraded Product Management -->
+            <!-- Product Management Section -->
             <div class="content-section">
                 <h3>Manage Products</h3>
                 <div class="product-management-area">
@@ -83,13 +82,17 @@
                                 <label for="product-image-url">Image URL (Optional)</label>
                                 <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
                             </div>
+                            <!-- THIS IS THE MISSING FIELD THAT CAUSED THE ERROR -->
+                            <div class="input-group">
+                                <label for="product-video-url">Video URL (Optional)</label>
+                                <input type="url" id="product-video-url" placeholder="https://youtube.com/watch?v=...">
+                            </div>
                             <button type="submit" class="btn-primary">Save Product & Add Pricing</button>
                         </form>
                     </div>
                     <div class="product-list-column">
                         <h4>Your Products</h4>
                         <div id="product-list-display">
-                            <!-- Products will be displayed here by category -->
                             <p>No products added yet.</p>
                         </div>
                     </div>
@@ -98,13 +101,11 @@
         </div>
     </main>
     
-    <!-- NEW: Modal for adding price tiers -->
+    <!-- Modal for adding price tiers -->
     <div id="price-tier-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <h2 id="price-tier-title">Manage Pricing for...</h2>
-            <div id="existing-tiers-list">
-                <!-- Existing price tiers will be listed here -->
-            </div>
+            <div id="existing-tiers-list"></div>
             <form id="add-price-tier-form">
                 <div class="input-group">
                     <label for="tier-label">Price Label</label>
