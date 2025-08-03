@@ -56,40 +56,72 @@
 
             <!-- MODIFIED: Upgraded Product Management -->
             <div class="content-section">
-                <h3>Add New Product</h3>
-                <form id="add-product-form">
-                    <div class="input-group">
-                        <label for="product-category">Category / Sub-Category</label>
-                        <select id="product-category" required>
-                            <option value="">-- First, create a category --</option>
-                        </select>
+                <h3>Manage Products</h3>
+                <div class="product-management-area">
+                    <div class="add-product-column">
+                        <h4>Add New Product</h4>
+                        <form id="add-product-form">
+                            <div class="input-group">
+                                <label for="product-category">Category / Sub-Category</label>
+                                <select id="product-category" required>
+                                    <option value="">-- First, create a category --</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="product-name">Product Name</label>
+                                <input type="text" id="product-name" required placeholder="e.g., Cool T-Shirt">
+                            </div>
+                            <div class="input-group">
+                                <label for="product-description">Description</label>
+                                <textarea id="product-description" rows="3" placeholder="Describe the product..."></textarea>
+                            </div>
+                            <div class="input-group">
+                                <label for="product-unit">Unit of Measurement</label>
+                                <input type="text" id="product-unit" required value="item" placeholder="e.g., item, gram, ml">
+                            </div>
+                            <div class="input-group">
+                                <label for="product-image-url">Image URL (Optional)</label>
+                                <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
+                            </div>
+                            <button type="submit" class="btn-primary">Save Product & Add Pricing</button>
+                        </form>
                     </div>
-                    <div class="input-group">
-                        <label for="product-name">Product Name</label>
-                        <input type="text" id="product-name" required placeholder="e.g., Cool T-Shirt">
+                    <div class="product-list-column">
+                        <h4>Your Products</h4>
+                        <div id="product-list-display">
+                            <!-- Products will be displayed here by category -->
+                            <p>No products added yet.</p>
+                        </div>
                     </div>
-                    <div class="input-group">
-                        <label for="product-price">Price</label>
-                        <input type="number" step="any" id="product-price" required placeholder="e.g., 19.99">
-                    </div>
-                    <div class="input-group">
-                        <label for="product-unit">Unit of Measurement</label>
-                        <input type="text" id="product-unit" required value="item" placeholder="e.g., item, gram, ml">
-                    </div>
-                    <div class="input-group">
-                        <label for="product-image-url">Image URL (Optional)</label>
-                        <input type="url" id="product-image-url" placeholder="https://example.com/image.jpg">
-                    </div>
-                    <div class="input-group">
-                        <label for="product-video-url">Video URL (Optional)</label>
-                        <input type="url" id="product-video-url" placeholder="https://youtube.com/watch?v=...">
-                    </div>
-                    <button type="submit" class="btn-primary">Add Product</button>
-                </form>
+                </div>
             </div>
         </div>
     </main>
     
+    <!-- NEW: Modal for adding price tiers -->
+    <div id="price-tier-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2 id="price-tier-title">Manage Pricing for...</h2>
+            <div id="existing-tiers-list">
+                <!-- Existing price tiers will be listed here -->
+            </div>
+            <form id="add-price-tier-form">
+                <div class="input-group">
+                    <label for="tier-label">Price Label</label>
+                    <input type="text" id="tier-label" required placeholder="e.g., 2 Pack, 500g">
+                </div>
+                <div class="input-group">
+                    <label for="tier-price">Price</label>
+                    <input type="number" step="any" id="tier-price" required placeholder="e.g., 25.00">
+                </div>
+                <button type="submit" class="btn-primary">Add Price Option</button>
+            </form>
+            <div class="modal-actions">
+                <button type="button" id="close-price-modal-button" class="btn-secondary">Done</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/manage.js"></script>
 </body>
 </html>

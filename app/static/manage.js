@@ -9,7 +9,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const addMainCategoryForm = document.getElementById('add-main-category-form');
     const addProductForm = document.getElementById('add-product-form');
     const productCategorySelect = document.getElementById('product-category');
+    const productListDisplayDiv = document.getElementById('product-list-display');
     const logoutButton = document.getElementById('logout-button');
+    
+    // Price Tier Modal Elements
+    const priceTierModal = document.getElementById('price-tier-modal');
+    const priceTierTitle = document.getElementById('price-tier-title');
+    const existingTiersList = document.getElementById('existing-tiers-list');
+    const addPriceTierForm = document.getElementById('add-price-tier-form');
+    const closePriceModalButton = document.getElementById('close-price-modal-button');
+    let currentProductIdForTiers = null;
 
     const pathParts = window.location.pathname.split('/');
     const botId = pathParts[pathParts.length - 1];
@@ -33,29 +42,24 @@ document.addEventListener('DOMContentLoaded', () => {
             if (viewOrdersLink) viewOrdersLink.href = `/orders/${bot.id}`;
             welcomeMessageTextarea.value = bot.welcome_message;
 
-            // Render the entire category tree
             renderCategoryTree(bot.categories);
+            renderAllProducts(bot.categories);
         } catch (error) {
             console.error('Failed to load bot data:', error);
         }
     }
 
-    // --- Category Rendering Functions ---
+    // --- Category & Product Rendering ---
     function renderCategoryTree(categories) {
-        categoryManagerDiv.innerHTML = ''; // Clear previous tree
+        categoryManagerDiv.innerHTML = '';
         productCategorySelect.innerHTML = '<option value="">-- Select a Category --</option>';
-
         if (categories.length === 0) {
-            if(noCategoriesMessage) {
-                categoryManagerDiv.appendChild(noCategoriesMessage);
-                noCategoriesMessage.style.display = 'block';
-            }
+            if(noCategoriesMessage) categoryManagerDiv.appendChild(noCategoriesMessage);
         } else {
-            if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
             categories.forEach(category => {
                 const categoryElement = createCategoryElement(category);
                 categoryManagerDiv.appendChild(categoryElement);
-                addCategoryToSelect(category, 0); // Add to product dropdown
+                addCategoryToSelect(category, 0);
             });
         }
     }
@@ -64,39 +68,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const categoryDiv = document.createElement('div');
         categoryDiv.className = 'category-node';
         categoryDiv.style.marginLeft = `${level * 25}px`;
-
-        const categoryHeader = document.createElement('div');
-        categoryHeader.className = 'category-header';
-        categoryHeader.innerHTML = `
-            <span class="category-name">${category.name}</span>
-            <button class="delete-category-btn" data-id="${category.id}">&times;</button>
+        categoryDiv.innerHTML = `
+            <div class="category-header">
+                <span class="category-name">${category.name}</span>
+                <button class="delete-category-btn" data-id="${category.id}">&times;</button>
+            </div>
+            <form class="sub-category-form">
+                <input type="text" placeholder="New sub-category name" required>
+                <button type="submit">Add</button>
+            </form>
+            <div class="sub-category-list"></div>
         `;
-        categoryDiv.appendChild(categoryHeader);
-
-        const subCategoryForm = document.createElement('form');
-        subCategoryForm.className = 'sub-category-form';
-        subCategoryForm.innerHTML = `
-            <input type="text" placeholder="New sub-category name" required>
-            <button type="submit">Add</button>
-        `;
-        categoryDiv.appendChild(subCategoryForm);
-
-        const subCategoryList = document.createElement('div');
+        const subCategoryList = categoryDiv.querySelector('.sub-category-list');
         category.sub_categories.forEach(sub => {
             subCategoryList.appendChild(createCategoryElement(sub, level + 1));
         });
-        categoryDiv.appendChild(subCategoryList);
-
-        const deleteButton = categoryHeader.querySelector('.delete-category-btn');
-        deleteButton.addEventListener('click', () => deleteCategory(category.id, category.name));
-
-        subCategoryForm.addEventListener('submit', (e) => {
+        categoryDiv.querySelector('.delete-category-btn').addEventListener('click', () => deleteCategory(category.id, category.name));
+        categoryDiv.querySelector('.sub-category-form').addEventListener('submit', (e) => {
             e.preventDefault();
-            const input = subCategoryForm.querySelector('input');
+            const input = e.target.querySelector('input');
             createSubCategory(input.value, category.id);
             input.value = '';
         });
-
         return categoryDiv;
     }
 
@@ -109,11 +102,75 @@ document.addEventListener('DOMContentLoaded', () => {
         category.sub_categories.forEach(sub => addCategoryToSelect(sub, level + 1));
     }
 
+    function renderAllProducts(categories) {
+        productListDisplayDiv.innerHTML = '';
+        let hasProducts = false;
+        categories.forEach(category => {
+            const productElements = renderProductsForCategory(category);
+            if (productElements) {
+                productListDisplayDiv.appendChild(productElements);
+                hasProducts = true;
+            }
+        });
+        if (!hasProducts) {
+            productListDisplayDiv.innerHTML = '<p>No products added yet.</p>';
+        }
+    }
+
+    function renderProductsForCategory(category) {
+        if (category.products.length === 0 && category.sub_categories.length === 0) return null;
+        const categorySection = document.createElement('div');
+        categorySection.className = 'product-category-section';
+        const categoryTitle = document.createElement('h4');
+        categoryTitle.textContent = category.name;
+        categorySection.appendChild(categoryTitle);
+
+        category.products.forEach(product => {
+            const productItem = document.createElement('div');
+            productItem.className = 'product-item-manage';
+            productItem.innerHTML = `
+                <span>${product.name}</span>
+                <button class="btn-secondary btn-small manage-pricing-btn" data-product-id="${product.id}" data-product-name="${product.name}">Manage Pricing</button>
+            `;
+            productItem.querySelector('.manage-pricing-btn').addEventListener('click', () => {
+                openPriceTierModal(product.id, product.name, product.price_tiers);
+            });
+            categorySection.appendChild(productItem);
+        });
+
+        category.sub_categories.forEach(subCategory => {
+            const subCategoryElements = renderProductsForCategory(subCategory);
+            if (subCategoryElements) {
+                subCategoryElements.style.marginLeft = '20px';
+                categorySection.appendChild(subCategoryElements);
+            }
+        });
+        return categorySection;
+    }
+
+    // --- Price Tier Modal Logic ---
+    function openPriceTierModal(productId, productName, tiers) {
+        currentProductIdForTiers = productId;
+        priceTierTitle.textContent = `Manage Pricing for: ${productName}`;
+        existingTiersList.innerHTML = '';
+        if (tiers.length > 0) {
+            tiers.forEach(tier => {
+                const tierEl = document.createElement('div');
+                tierEl.className = 'price-tier-item';
+                tierEl.textContent = `${tier.label} - £${tier.price.toFixed(2)}`;
+                existingTiersList.appendChild(tierEl);
+            });
+        } else {
+            existingTiersList.innerHTML = '<p>No price options added yet.</p>';
+        }
+        priceTierModal.classList.remove('hidden');
+    }
+
     // --- API Call Functions ---
     async function deleteCategory(categoryId, categoryName) {
-        if (confirm(`Are you sure you want to delete the category "${categoryName}" and all its contents?`)) {
+        if (confirm(`Are you sure you want to delete "${categoryName}" and all its contents?`)) {
             await fetch(`/api/categories/${categoryId}`, { method: 'DELETE' });
-            loadBotData(); // Reload the whole tree
+            loadBotData();
         }
     }
 
@@ -135,11 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: welcomeMessageTextarea.value })
             });
-            if (response.ok) {
-                alert('Welcome message saved!');
-            } else {
-                alert('Failed to save message.');
-            }
+            alert(response.ok ? 'Welcome message saved!' : 'Failed to save message.');
         });
     }
     
@@ -163,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const productData = {
                 category_id: document.getElementById('product-category').value,
                 name: document.getElementById('product-name').value,
-                price: document.getElementById('product-price').value,
+                description: document.getElementById('product-description').value,
                 unit: document.getElementById('product-unit').value,
                 image_url: document.getElementById('product-image-url').value,
                 video_url: document.getElementById('product-video-url').value,
@@ -174,12 +227,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(productData)
             });
             if (response.ok) {
+                const newProduct = await response.json();
                 addProductForm.reset();
-                alert('Product added successfully!');
-                // We don't need to reload the whole page, just the product list part in a future step
+                openPriceTierModal(newProduct.id, newProduct.name, []);
+                loadBotData();
             } else {
                 alert('Failed to add product.');
             }
+        });
+    }
+
+    if (addPriceTierForm) {
+        addPriceTierForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tierData = {
+                label: document.getElementById('tier-label').value,
+                price: document.getElementById('tier-price').value
+            };
+            const response = await fetch(`/api/products/${currentProductIdForTiers}/price-tiers`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(tierData)
+            });
+            if (response.ok) {
+                addPriceTierForm.reset();
+                const newTier = await response.json();
+                const tierEl = document.createElement('div');
+                tierEl.className = 'price-tier-item';
+                tierEl.textContent = `${newTier.label} - £${newTier.price.toFixed(2)}`;
+                if (existingTiersList.querySelector('p')) {
+                    existingTiersList.innerHTML = '';
+                }
+                existingTiersList.appendChild(tierEl);
+            } else {
+                alert('Failed to add price option.');
+            }
+        });
+    }
+
+    if(closePriceModalButton) {
+        closePriceModalButton.addEventListener('click', () => {
+            priceTierModal.classList.add('hidden');
+            loadBotData(); // Reload to show updated product list
         });
     }
 
