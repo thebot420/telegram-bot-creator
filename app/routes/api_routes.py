@@ -377,6 +377,38 @@ def add_price_tier(product_id):
     db.session.commit()
     return jsonify(new_price_tier.to_dict()), 201
 
+@api.route('/api/price-tiers/<tier_id>', methods=['DELETE'])
+def delete_price_tier(tier_id):
+    price_tier = db.session.get(PriceTier, tier_id)
+    if not price_tier:
+        return jsonify({'message': 'Price tier not found'}), 404
+    db.session.delete(price_tier)
+    db.session.commit()
+    return jsonify({'message': 'Price tier deleted successfully'}), 200
+
+@api.route('/api/products/<product_id>', methods=['DELETE'])
+def delete_product(product_id):
+    product = db.session.get(Product, product_id)
+    if not product:
+        return jsonify({'message': 'Product not found'}), 404
+    db.session.delete(product)
+    db.session.commit()
+    return jsonify({'message': 'Product deleted successfully'}), 200
+
+@api.route('/api/upload-media', methods=['POST'])
+def upload_media():
+    if 'file' not in request.files:
+        return jsonify({'message': 'No file part in the request'}), 400
+    file_to_upload = request.files['file']
+    if file_to_upload.filename == '':
+        return jsonify({'message': 'No selected file'}), 400
+    try:
+        upload_result = cloudinary.uploader.upload(file_to_upload, resource_type="auto")
+        return jsonify({'secure_url': upload_result['secure_url']}), 200
+    except Exception as e:
+        logging.error(f"Cloudinary upload failed: {e}")
+        return jsonify({'message': 'Failed to upload file.'}), 500
+
 @api.route('/api/bots/<bot_id>/orders', methods=['GET'])
 def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
