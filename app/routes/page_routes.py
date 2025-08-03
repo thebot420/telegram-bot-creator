@@ -1,8 +1,12 @@
 from flask import Blueprint, render_template
 
-# This Blueprint is now much simpler. The main app is responsible for
-# knowing where the templates folder is.
-pages = Blueprint('pages', __name__)
+# --- THIS IS THE CRITICAL FIX ---
+# We are now explicitly telling this Blueprint where to find its static files
+# and that it should serve them from the main URL (e.g., /style.css).
+pages = Blueprint('pages', __name__,
+                  template_folder='../templates',
+                  static_folder='../static',
+                  static_url_path='/')
 
 @pages.route('/')
 def serve_login_page():
