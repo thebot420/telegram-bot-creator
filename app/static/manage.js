@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (categories.length === 0) {
             if(noCategoriesMessage) categoryManagerDiv.appendChild(noCategoriesMessage);
         } else {
+            if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
             categories.forEach(category => {
                 const categoryElement = createCategoryElement(category);
                 categoryManagerDiv.appendChild(categoryElement);
@@ -153,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentProductIdForTiers = productId;
         priceTierTitle.textContent = `Manage Pricing for: ${productName}`;
         existingTiersList.innerHTML = '';
-        if (tiers.length > 0) {
+        if (tiers && tiers.length > 0) {
             tiers.forEach(tier => {
                 const tierEl = document.createElement('div');
                 tierEl.className = 'price-tier-item';
@@ -268,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(closePriceModalButton) {
         closePriceModalButton.addEventListener('click', () => {
             priceTierModal.classList.add('hidden');
-            loadBotData(); // Reload to show updated product list
+            loadBotData();
         });
     }
 
