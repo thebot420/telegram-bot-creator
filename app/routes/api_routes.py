@@ -66,7 +66,6 @@ def execute_payout(order):
             order_to_update.payout_status = 'failed'
         db.session.commit()
 
-# --- NEW: Reusable function to display the cart ---
 async def send_cart_view(bot, chat_id, message_id, bot_id):
     cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
     if not cart or not cart.items:
@@ -89,6 +88,7 @@ async def send_cart_view(bot, chat_id, message_id, bot_id):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
 
+# --- NEW: Completely Rebuilt Telegram Handler with State Management ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
@@ -99,10 +99,11 @@ async def handle_telegram_update(bot_token, update_data):
         if not bot_data or not bot_data.owner.is_active: 
             return
 
+        # --- Case 1: A button was pressed (CallbackQuery) ---
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
-            message_id = query.message.message_id # Get message_id for editing
+            message_id = query.message.message_id
             data = query.data
             await query.answer()
             
@@ -210,7 +211,13 @@ async def handle_telegram_update(bot_token, update_data):
                 total_price = sum(item.quantity * item.price_tier.price for item in cart.items)
                 order_description = ", ".join([f"{item.quantity}x {item.price_tier.product.name} ({item.price_tier.label})" for item in cart.items])
 
-                new_order = Order(product_name=order_description, price=total_price, bot_id=cart.bot_id)
+                new_order = Order(
+                    product_name=order_description, 
+                    price=total_price, 
+                    bot_id=cart.bot_id,
+                    telegram_username=query.from_user.username,
+                    status='awaiting_payment'
+                )
                 db.session.add(new_order)
                 db.session.commit()
 
@@ -229,6 +236,26 @@ async def handle_telegram_update(bot_token, update_data):
 
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
+            text = update.message.text
+
+            # --- State Management for Shipping Info ---
+            pending_order_address = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_address', telegram_username=update.message.from_user.username).first()
+            if pending_order_address:
+                pending_order_address.shipping_address = text
+                pending_order_address.status = 'awaiting_note'
+                db.session.commit()
+                await bot.send_message(chat_id=chat_id, text="Great! Please reply with any additional notes for your order.")
+                return
+
+            pending_order_note = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_note', telegram_username=update.message.from_user.username).first()
+            if pending_order_note:
+                pending_order_note.customer_note = text
+                pending_order_note.status = 'paid'
+                db.session.commit()
+                await bot.send_message(chat_id=chat_id, text="Thank you! Your order is complete and will be processed shortly.")
+                return
+
+            # Default action for text messages (/start)
             keyboard = [
                 [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
                 [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
@@ -370,10 +397,16 @@ def nowpayments_webhook():
     order_id = data.get('order_id')
     payment_status = data.get('payment_status')
     order = db.session.get(Order, order_id)
-    if order and payment_status == 'finished' and order.payout_status == 'unpaid':
-        order.status = 'paid'
+    if order and payment_status == 'finished' and order.status == 'awaiting_payment':
+        order.status = 'awaiting_address'
         db.session.commit()
-        logging.info(f"Order {order_id} marked as paid.")
+        logging.info(f"Order {order_id} paid. Now awaiting address.")
+        
+        bot_token = order.bot.token
+        chat_id = order.chat_id
+        bot = telegram.Bot(token=bot_token)
+        run_async(bot.send_message(chat_id=chat_id, text="✅ Payment confirmed! Please reply with your full shipping address."))
+        
         execute_payout(order)
     return "ok", 200
 
