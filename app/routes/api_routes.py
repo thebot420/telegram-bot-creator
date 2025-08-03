@@ -66,7 +66,7 @@ def execute_payout(order):
             order_to_update.payout_status = 'failed'
         db.session.commit()
 
-# --- NEW: Completely Rebuilt Telegram Handler ---
+# --- NEW: Completely Rebuilt Telegram Handler with Ultimate Navigation ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
@@ -101,10 +101,10 @@ async def handle_telegram_update(bot_token, update_data):
             elif action == 'browse_products':
                 main_categories = [c for c in bot_data.categories if c.parent_id is None]
                 if not main_categories:
-                    await query.edit_message_text(text="This shop has no categories yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+                    await query.edit_message_text(text="This shop has no categories yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
                     return
                 keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in main_categories]
-                keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+                keyboard.append([InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(text="Please select a category:", reply_markup=reply_markup)
 
@@ -112,10 +112,11 @@ async def handle_telegram_update(bot_token, update_data):
                 category = db.session.get(Category, item_id)
                 if not category: return
                 
+                back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
+                
                 if category.sub_categories:
                     keyboard = [[InlineKeyboardButton(sc.name, callback_data=f"view_category:{sc.id}")] for sc in category.sub_categories]
-                    back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
-                    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)])
+                    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_button_data), InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     await query.edit_message_text(text=f"Sub-categories in {category.name}:", reply_markup=reply_markup)
                 elif category.products:
@@ -135,10 +136,15 @@ async def handle_telegram_update(bot_token, update_data):
                                 await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
                         except telegram.error.BadRequest:
                             await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
-                    back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
-                    await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
+                    
+                    nav_keyboard = [[
+                        InlineKeyboardButton("⬅️ Back", callback_data=back_button_data),
+                        InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
+                    ]]
+                    await bot.send_message(chat_id=chat_id, text="What would you like to do next?", reply_markup=InlineKeyboardMarkup(nav_keyboard))
                 else:
-                    await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
+                    await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
             
             # --- Shopping Cart Logic ---
             elif action == 'add_cart':
@@ -148,7 +154,7 @@ async def handle_telegram_update(bot_token, update_data):
                     if not cart:
                         cart = Cart(chat_id=str(chat_id), bot_id=bot_data.id)
                         db.session.add(cart)
-                        db.session.flush() # Get cart.id before commit
+                        db.session.flush()
                     
                     cart_item = CartItem.query.filter_by(cart_id=cart.id, price_tier_id=price_tier.id).first()
                     if cart_item:
@@ -156,7 +162,6 @@ async def handle_telegram_update(bot_token, update_data):
                     else:
                         cart_item = CartItem(cart_id=cart.id, price_tier_id=price_tier.id, quantity=1)
                         db.session.add(cart_item)
-                    
                     db.session.commit()
                     await bot.send_message(chat_id=chat_id, text=f"✅ '{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
 
@@ -187,7 +192,6 @@ async def handle_telegram_update(bot_token, update_data):
                 if cart_item:
                     db.session.delete(cart_item)
                     db.session.commit()
-                # Refresh the cart view by faking a callback
                 fake_callback_data = {'callback_query': {'data': 'view_cart', 'message': query.message.to_dict(), 'id': query.id}}
                 await handle_telegram_update(bot_token, fake_callback_data)
             
