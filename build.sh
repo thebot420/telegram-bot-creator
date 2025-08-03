@@ -1,1 +1,1 @@
-python create_db.py
+flask --app run init-db
