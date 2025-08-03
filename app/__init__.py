@@ -8,9 +8,8 @@ def create_app():
     """
     This is the application factory. It creates and configures the Flask app.
     """
-    # --- THIS IS THE CRITICAL FIX ---
-    # We are now explicitly telling Flask where to find our frontend files,
-    # relative to the 'app' directory where this file lives.
+    # This is the critical fix. We explicitly tell Flask where to find
+    # our frontend files, relative to the main 'app' directory.
     app = Flask(__name__, 
                 instance_relative_config=True,
                 template_folder='templates', 
@@ -26,7 +25,7 @@ def create_app():
         # Import models so SQLAlchemy knows about our tables.
         from . import models
 
-        # Import and register Blueprints
+        # Import and register our Blueprints (the route files).
         from .routes.page_routes import pages
         from .routes.api_routes import api
         app.register_blueprint(pages)
