@@ -1,5 +1,29 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Get all necessary elements ---
+    // --- Initialize FilePond Uploader ---
+    // This turns our simple file input into a powerful drag-and-drop uploader.
+    const inputElement = document.querySelector('input[type="file"]');
+    const pond = FilePond.create(inputElement);
+
+    // This tells FilePond where to send the uploaded files.
+    FilePond.setOptions({
+        server: '/api/upload-media',
+    });
+
+    let uploadedFileUrl = null; // Variable to store the returned Cloudinary URL
+
+    // Listen for when a file has been successfully processed by our server
+    pond.on('processfile', (error, file) => {
+        if (error) {
+            console.error('FilePond server error:', error);
+            return;
+        }
+        // The server's response is stored in file.serverId
+        const response = JSON.parse(file.serverId);
+        uploadedFileUrl = response.secure_url;
+    });
+
+
+    // --- Get all other necessary elements ---
     const pageTitle = document.getElementById('manage-bot-title');
     const viewOrdersLink = document.getElementById('view-orders-link');
     const welcomeMessageForm = document.getElementById('welcome-message-form');
@@ -12,7 +36,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const productListDisplayDiv = document.getElementById('product-list-display');
     const logoutButton = document.getElementById('logout-button');
     
-    // Price Tier Modal Elements
     const priceTierModal = document.getElementById('price-tier-modal');
     const priceTierTitle = document.getElementById('price-tier-title');
     const existingTiersList = document.getElementById('existing-tiers-list');
@@ -130,11 +153,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const productItem = document.createElement('div');
             productItem.className = 'product-item-manage';
             productItem.innerHTML = `
-                <span>${product.name}</span>
-                <button class="btn-secondary btn-small manage-pricing-btn" data-product-id="${product.id}" data-product-name="${product.name}">Manage Pricing</button>
+                <span class="product-name-manage">${product.name}</span>
+                <div class="product-actions-manage">
+                    <button class="btn-secondary btn-small manage-pricing-btn">Manage Pricing</button>
+                    <button class="delete-btn btn-small delete-product-btn">Delete Product</button>
+                </div>
             `;
             productItem.querySelector('.manage-pricing-btn').addEventListener('click', () => {
                 openPriceTierModal(product.id, product.name, product.price_tiers);
+            });
+            productItem.querySelector('.delete-product-btn').addEventListener('click', () => {
+                deleteProduct(product.id, product.name);
             });
             categorySection.appendChild(productItem);
         });
@@ -149,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return categorySection;
     }
 
-    // --- Price Tier Modal Logic ---
     function openPriceTierModal(productId, productName, tiers) {
         currentProductIdForTiers = productId;
         priceTierTitle.textContent = `Manage Pricing for: ${productName}`;
@@ -199,6 +227,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function deleteProduct(productId, productName) {
+        if (confirm(`Are you sure you want to delete the product "${productName}"?`)) {
+            const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadBotData();
+            } else {
+                alert('Failed to delete product.');
+            }
+        }
+    }
+
     // --- Form Event Listeners ---
     if (welcomeMessageForm) {
         welcomeMessageForm.addEventListener('submit', async (e) => {
@@ -234,8 +273,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: document.getElementById('product-name').value,
                 description: document.getElementById('product-description').value,
                 unit: document.getElementById('product-unit').value,
-                image_url: document.getElementById('product-image-url').value,
-                video_url: document.getElementById('product-video-url').value,
+                image_url: uploadedFileUrl, // Use the URL from the uploaded file
+                video_url: null, // We can add a separate uploader for this later
             };
             const response = await fetch(`/api/bots/${botId}/products`, {
                 method: 'POST',
@@ -245,6 +284,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 const newProduct = await response.json();
                 addProductForm.reset();
+                pond.removeFiles(); // Clear the file uploader
+                uploadedFileUrl = null;
                 openPriceTierModal(newProduct.id, newProduct.name, []);
                 loadBotData();
             } else {

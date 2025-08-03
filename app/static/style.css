@@ -829,4 +829,51 @@ select {
 }
 
 
+/* --- Manage Product List Styles --- */
+.product-item-manage {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #2a3b45;
+}
+
+.product-name-manage {
+    font-weight: 500;
+}
+
+.product-actions-manage {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* --- FilePond Uploader Styles --- */
+
+/* This changes the main background color of the drop area */
+.filepond--panel-root {
+    background-color: #1e2a33;
+    border: 2px dashed #445;
+}
+
+/* This styles the text inside the drop area */
+.filepond--drop-label {
+    color: #a0b0b9;
+}
+
+/* This styles the file info text after a file has been added */
+.filepond--file-info-main {
+    color: #e0e0e0;
+}
+
+/* This styles the file size text */
+.filepond--file-info-sub {
+    color: #a0b0b9;
+}
+
+/* This styles the progress bar */
+.filepond--progress-indicator {
+    background-color: #00aaff;
+}
+
+
 

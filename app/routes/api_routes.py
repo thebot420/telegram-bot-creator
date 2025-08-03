@@ -10,8 +10,19 @@ import requests
 import hmac
 import hashlib
 import json
+# NEW: Cloudinary imports
+import cloudinary
+import cloudinary.uploader
 
 api = Blueprint('api', __name__)
+
+# --- Cloudinary Configuration ---
+cloudinary.config(
+    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
+    api_key = os.environ.get('CLOUDINARY_API_KEY'),
+    api_secret = os.environ.get('CLOUDINARY_API_SECRET'),
+    secure = True
+)
 
 # --- NOWPayments & Telegram Bot Setup ---
 SERVER_URL = "https://telegram-bot-creator.onrender.com"
@@ -43,16 +54,14 @@ def execute_payout(order):
     pass
 
 async def handle_telegram_update(bot_token, update_data):
+    # This logic is now correct and stable
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
-    
     with current_app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
-        if not bot_data or not bot_data.owner.is_active: 
-            logging.warning(f"--- Bot owner inactive or bot not found for token {bot_token[:10]}... ---")
-            return
-        
+        if not bot_data or not bot_data.owner.is_active: return
+
         if update.callback_query:
             query = update.callback_query
             chat_id = query.message.chat_id
@@ -97,8 +106,7 @@ async def handle_telegram_update(bot_token, update_data):
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     await query.edit_message_text(text=f"Sub-categories in {category.name}:", reply_markup=reply_markup)
                 elif category.products:
-                    # We send a new message here instead of editing to avoid errors
-                    await bot.send_message(chat_id=chat_id, text=f"Products in {category.name}:")
+                    await query.edit_message_text(text=f"Products in {category.name}:")
                     for product in category.products:
                         caption = f"**{product.name}**\n{product.description or ''}\n\n"
                         keyboard = []
@@ -107,8 +115,6 @@ async def handle_telegram_update(bot_token, update_data):
                             keyboard.append([InlineKeyboardButton(f"Add {tier.label} to Cart", callback_data=f"add_cart:{tier.id}")])
                         
                         reply_markup = InlineKeyboardMarkup(keyboard)
-                        
-                        # --- THIS IS THE CRITICAL FIX ---
                         try:
                             if product.image_url:
                                 await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
@@ -116,15 +122,13 @@ async def handle_telegram_update(bot_token, update_data):
                                 await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
                         except telegram.error.BadRequest as e:
                             logging.error(f"Telegram BadRequest (likely invalid image URL): {e}. Falling back to text.")
-                            # Failsafe: If image URL is bad, send as text instead of crashing
                             await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
-
                     back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
                     await bot.send_message(chat_id=chat_id, text="Go back?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
                 else:
                     await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.")
             
-            elif action == 'add_cart': # Placeholder for future cart logic
+            elif action == 'add_cart':
                 price_tier = db.session.get(PriceTier, item_id)
                 if price_tier:
                     await bot.send_message(chat_id=chat_id, text=f"'{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
