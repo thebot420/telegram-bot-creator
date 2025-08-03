@@ -14,20 +14,42 @@
             <h1>Bot Creator</h1>
         </div>
         <div class="header-user">
-            <a href="#" id="back-to-manage-link" class="header-link">← Back to Manage</a>
+            <a href="#" id="back-to-manage-link" class="header-link">← Back to Manage Bot</a>
             <button id="logout-button">Logout</button>
         </div>
     </header>
 
     <main class="dashboard-main">
         <div class="dashboard-content">
-            <h2>Bot Orders</h2>
-            <div id="orders-list">
-                <p id="no-orders-message">No orders have been received yet.</p>
+            <div class="page-header">
+                <h2 id="orders-title">Bot Orders</h2>
+            </div>
+
+            <div class="content-section">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Product(s)</th>
+                                <th>Price</th>
+                                <th>Status</th>
+                                <!-- NEW COLUMNS -->
+                                <th>Telegram User</th>
+                                <th>Shipping Address</th>
+                                <th>Notes</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-list">
+                            <!-- Orders will be dynamically added here -->
+                        </tbody>
+                    </table>
+                </div>
+                <p id="no-orders-message" class="hidden">This bot has no orders yet.</p>
             </div>
         </div>
     </main>
-
+    
     <script src="/orders.js"></script>
 </body>
 </html>

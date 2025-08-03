@@ -1,52 +1,74 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const ordersListDiv = document.getElementById('orders-list');
+    // --- Get all necessary elements ---
+    const pageTitle = document.getElementById('orders-title');
+    const backToManageLink = document.getElementById('back-to-manage-link');
+    const logoutButton = document.getElementById('logout-button');
+    const ordersListBody = document.getElementById('orders-list');
     const noOrdersMessage = document.getElementById('no-orders-message');
-    const backButton = document.getElementById('back-to-manage-link');
 
     // Get the bot ID from the URL
     const pathParts = window.location.pathname.split('/');
     const botId = pathParts[pathParts.length - 1];
 
-    // Set the "Back" button link correctly
-    if (backButton) {
-        backButton.href = `/manage/${botId}`;
+    // --- Event Listeners ---
+    if (backToManageLink) {
+        backToManageLink.href = `/manage/${botId}`;
     }
 
-    function renderOrder(order) {
-        if (noOrdersMessage) {
-            noOrdersMessage.style.display = 'none';
-        }
-        const orderDiv = document.createElement('div');
-        orderDiv.className = 'order-item';
+    if (logoutButton) {
+        logoutButton.addEventListener('click', () => {
+            localStorage.removeItem('userId');
+            window.location.href = '/';
+        });
+    }
 
+    // --- Functions ---
+
+    // Renders a single order row in the table
+    function renderOrder(order) {
+        const orderRow = document.createElement('tr');
         const orderDate = new Date(order.timestamp).toLocaleString();
 
-        orderDiv.innerHTML = `
-            <div class="order-details">
-                <span class="order-product-name">${order.product_name}</span>
-                <span class="order-id">ID: ...${order.id.slice(-6)}</span>
-            </div>
-            <div class="order-info">
-                <span class="order-price">${order.price}</span>
-                <span class="order-timestamp">${orderDate}</span>
-            </div>
+        // Use empty strings as placeholders if data is not available
+        const username = order.telegram_username ? `@${order.telegram_username}` : 'N/A';
+        const address = order.shipping_address || 'N/A';
+        const note = order.customer_note || 'None';
+
+        orderRow.innerHTML = `
+            <td>${order.product_name}</td>
+            <td>£${order.price.toFixed(2)}</td>
+            <td><span class="status-${order.status}">${order.status}</span></td>
+            <td>${username}</td>
+            <td>${address}</td>
+            <td>${note}</td>
+            <td>${orderDate}</td>
         `;
-        ordersListDiv.appendChild(orderDiv);
+        ordersListBody.appendChild(orderRow);
     }
 
-    async function loadOrders() {
+    // Fetches all orders for this specific bot
+    async function fetchBotOrders() {
         if (!botId) return;
         try {
-            // We'll create this API endpoint next
             const response = await fetch(`/api/bots/${botId}/orders`);
-            if (!response.ok) return;
-
-            const orders = await response.json();
-            orders.forEach(order => renderOrder(order));
+            if (response.ok) {
+                const orders = await response.json();
+                
+                ordersListBody.innerHTML = ''; // Clear previous list
+                
+                if (orders.length > 0) {
+                    noOrdersMessage.classList.add('hidden');
+                    orders.forEach(order => renderOrder(order));
+                } else {
+                    noOrdersMessage.classList.remove('hidden');
+                }
+            }
         } catch (error) {
-            console.error('Failed to load orders:', error);
+            console.error('Failed to fetch bot orders:', error);
         }
     }
 
-    loadOrders();
+    // Set the page title and load the initial data
+    pageTitle.textContent = `Orders for Bot (...${botId.slice(-6)})`;
+    fetchBotOrders();
 });
