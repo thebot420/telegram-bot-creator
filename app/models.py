@@ -108,6 +108,7 @@ class Order(db.Model):
             'price': self.price, 
             'timestamp': self.timestamp.isoformat(), 
             'status': self.status,
+            'payout_status': self.payout_status, # NEW: Added for backend logic
             'telegram_username': self.telegram_username,
             'shipping_address': self.shipping_address,
             'customer_note': self.customer_note
