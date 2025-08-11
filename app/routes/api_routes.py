@@ -88,7 +88,7 @@ async def send_cart_view(bot, chat_id, message_id, bot_id):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-# --- NEW: Completely Rebuilt Telegram Handler with State Management ---
+# --- NEW: Completely Rebuilt Telegram Handler with State Management & My Orders ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
     bot = telegram.Bot(token=bot_token)
@@ -111,14 +111,17 @@ async def handle_telegram_update(bot_token, update_data):
             action = parts[0]
             item_id = parts[1] if len(parts) > 1 else None
 
+            # --- Main Menu Navigation ---
             if action == 'main_menu':
                 keyboard = [
                     [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
                     [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
 
+            # --- Product Browsing ---
             elif action == 'browse_products':
                 main_categories = [c for c in bot_data.categories if c.parent_id is None]
                 if not main_categories:
@@ -167,6 +170,7 @@ async def handle_telegram_update(bot_token, update_data):
                 else:
                     await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
             
+            # --- Shopping Cart Logic ---
             elif action == 'add_cart':
                 price_tier = db.session.get(PriceTier, item_id)
                 if price_tier:
@@ -215,6 +219,7 @@ async def handle_telegram_update(bot_token, update_data):
                     product_name=order_description, 
                     price=total_price, 
                     bot_id=cart.bot_id,
+                    chat_id=str(chat_id),
                     telegram_username=query.from_user.username,
                     status='awaiting_payment'
                 )
@@ -233,13 +238,29 @@ async def handle_telegram_update(bot_token, update_data):
                     await query.edit_message_text(text=f"Thank you! Please complete your payment of £{total_price:.2f} using the secure link below:\n\n{invoice_url}")
                 else:
                     await query.edit_message_text(text="Sorry, there was an error creating your payment link. Please try again.")
+            
+            # --- NEW: My Orders Logic ---
+            elif action == 'my_orders':
+                orders = Order.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).order_by(Order.timestamp.desc()).limit(10).all()
+                if not orders:
+                    await query.edit_message_text(text="You have no past orders.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+                    return
+                
+                orders_text = "📦 **Your Recent Orders**\n\n"
+                for order in orders:
+                    status_emoji = "✅ Dispatched" if order.status == 'dispatched' else "💰 Paid"
+                    orders_text += f"_{order.timestamp.strftime('%d %b %Y')}_ - {order.product_name}\n**Status:** {status_emoji}\n\n"
+                
+                await query.edit_message_text(text=orders_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]), parse_mode='Markdown')
 
+
+        # --- Case 2: A text message was sent (e.g., /start or shipping info) ---
         elif update.message and update.message.text:
             chat_id = update.message.chat_id
             text = update.message.text
 
             # --- State Management for Shipping Info ---
-            pending_order_address = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_address', telegram_username=update.message.from_user.username).first()
+            pending_order_address = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_address', chat_id=str(chat_id)).first()
             if pending_order_address:
                 pending_order_address.shipping_address = text
                 pending_order_address.status = 'awaiting_note'
@@ -247,7 +268,7 @@ async def handle_telegram_update(bot_token, update_data):
                 await bot.send_message(chat_id=chat_id, text="Great! Please reply with any additional notes for your order.")
                 return
 
-            pending_order_note = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_note', telegram_username=update.message.from_user.username).first()
+            pending_order_note = Order.query.filter_by(bot_id=bot_data.id, status='awaiting_note', chat_id=str(chat_id)).first()
             if pending_order_note:
                 pending_order_note.customer_note = text
                 pending_order_note.status = 'paid'
@@ -258,6 +279,7 @@ async def handle_telegram_update(bot_token, update_data):
             # Default action for text messages (/start)
             keyboard = [
                 [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
                 [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -537,3 +559,16 @@ def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
     if bot: return jsonify([o.to_dict() for o in bot.orders])
     return jsonify({'message': 'Bot not found'}), 404
+    
+
+
+@api.route('/api/orders/<order_id>/dispatch', methods=['POST'])
+def dispatch_order(order_id):
+    """Updates an order's status to 'dispatched'."""
+    order = db.session.get(Order, order_id)
+    if not order:
+        return jsonify({'message': 'Order not found'}), 404
+    
+    order.status = 'dispatched'
+    db.session.commit()
+    return jsonify({'message': 'Order marked as dispatched'}), 200

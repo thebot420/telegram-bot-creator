@@ -37,13 +37,42 @@ document.addEventListener('DOMContentLoaded', () => {
         orderRow.innerHTML = `
             <td>${order.product_name}</td>
             <td>£${order.price.toFixed(2)}</td>
-            <td><span class="status-${order.status}">${order.status}</span></td>
+            <td><span class="status-${order.status}">${order.status.replace('_', ' ')}</span></td>
             <td>${username}</td>
             <td>${address}</td>
             <td>${note}</td>
             <td>${orderDate}</td>
+            <td class="actions-cell"></td>
         `;
+
+        const actionsCell = orderRow.querySelector('.actions-cell');
+        
+        // Only show the "Mark as Dispatched" button if the order has been paid
+        if (order.status === 'paid') {
+            const dispatchButton = document.createElement('button');
+            dispatchButton.className = 'btn-primary btn-small';
+            dispatchButton.textContent = 'Mark as Dispatched';
+            dispatchButton.addEventListener('click', () => markAsDispatched(order.id, dispatchButton));
+            actionsCell.appendChild(dispatchButton);
+        } else if (order.status === 'dispatched') {
+            actionsCell.textContent = '✅ Dispatched';
+        }
+
+
         ordersListBody.appendChild(orderRow);
+    }
+
+    // --- API Call Functions ---
+    async function markAsDispatched(orderId, buttonElement) {
+        const response = await fetch(`/api/orders/${orderId}/dispatch`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            buttonElement.parentElement.textContent = '✅ Dispatched';
+        } else {
+            alert('Failed to update order status.');
+        }
     }
 
     // Fetches all orders for this specific bot
