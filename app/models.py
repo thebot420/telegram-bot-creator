@@ -1,5 +1,3 @@
-# This file defines the structure of our database tables using SQLAlchemy models.
-
 from . import db
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
@@ -92,16 +90,13 @@ class PriceTier(db.Model):
 
 class Order(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    product_name = db.Column(db.Text, nullable=False) # Changed to Text for long cart descriptions
+    product_name = db.Column(db.Text, nullable=False)
     price = db.Column(db.Float, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-    # NEW: More descriptive status for order fulfillment
     status = db.Column(db.String(30), default='awaiting_payment', nullable=False)
     payout_status = db.Column(db.String(20), default='unpaid', nullable=False)
     bot_id = db.Column(db.String(36), db.ForeignKey('bot.id'), nullable=False)
-    
-    # --- NEW: Fields for customer shipping information ---
-    chat_id = db.Column(db.String(100), nullable=True) # To contact the user post-payment
+    chat_id = db.Column(db.String(100), nullable=True)
     telegram_username = db.Column(db.String(100), nullable=True)
     shipping_address = db.Column(db.Text, nullable=True)
     customer_note = db.Column(db.Text, nullable=True)
