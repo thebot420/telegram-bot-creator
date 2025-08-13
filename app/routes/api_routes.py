@@ -274,36 +274,6 @@ def login():
 
 # ... (All other API routes are correct and unchanged)
 
-@api.route('/webhook/nowpayments', methods=['POST'])
-def nowpayments_webhook():
-    signature = request.headers.get('x-nowpayments-sig')
-    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY: return "Configuration error", 400
-    try:
-        sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
-        expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
-        if not hmac.compare_digest(expected_signature, signature):
-            return "Invalid signature", 400
-    except Exception as e:
-        return "Verification error", 400
-    
-    data = request.get_json()
-    order_id = data.get('order_id')
-    payment_status = data.get('payment_status')
-    
-    order = db.session.get(Order, order_id)
-    if order and payment_status == 'finished' and order.status == 'awaiting_payment':
-        order.status = 'awaiting_address'
-        db.session.commit()
-        logging.info(f"Order {order_id} paid. Now awaiting address.")
-        
-        bot_token = order.bot.token
-        chat_id = order.chat_id
-        bot = telegram.Bot(token=bot_token)
-        run_async(bot.send_message(chat_id=chat_id, text="✅ Payment confirmed! Please reply with your full shipping address."))
-        
-        execute_payout(order)
-    return "ok", 200
-
 # ... (All other API routes are correct and unchanged)
 
 @api.route('/api/admin/login', methods=['POST'])
