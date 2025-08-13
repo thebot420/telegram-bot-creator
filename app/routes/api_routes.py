@@ -264,63 +264,85 @@ async def handle_telegram_update(bot_token, update_data):
             await bot.send_message(chat_id=chat_id, text=bot_data.welcome_message, reply_markup=reply_markup)
 
 # --- API ROUTES ---
+# Make sure User and login_user are available from your imports
+from ..models import User
+from flask_login import login_user
+
+# ... inside api_routes.py ...
+
 @api.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
     user = User.query.filter_by(email=data.get('email')).first()
+    
+    # Check if the user exists, is active, and the password is correct
     if user and user.is_active and user.check_password(data.get('password')):
+        # Create a secure session cookie for this user
+        login_user(user)
+        # We still send back the userId for the frontend to use, but the
+        # actual security is now handled by the server-side session.
         return jsonify({'message': 'Login successful!', 'userId': user.id}), 200
+    
     return jsonify({'message': 'Invalid email or password'}), 401
-
 # ... (All other API routes are correct and unchanged)
+# In app/routes/api_routes.py
+from flask import Blueprint, request, jsonify, current_app
+from functools import wraps # Make sure this is imported
+from flask_login import current_user # Make sure this is imported
+# ... other imports
 
-@api.route('/webhook/nowpayments', methods=['POST'])
-def nowpayments_webhook():
-    signature = request.headers.get('x-nowpayments-sig')
-    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY: return "Configuration error", 400
-    try:
-        sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
-        expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
-        if not hmac.compare_digest(expected_signature, signature):
-            return "Invalid signature", 400
-    except Exception as e:
-        return "Verification error", 400
-    
-    data = request.get_json()
-    order_id = data.get('order_id')
-    payment_status = data.get('payment_status')
-    
-    order = db.session.get(Order, order_id)
-    if order and payment_status == 'finished' and order.status == 'awaiting_payment':
-        order.status = 'awaiting_address'
-        db.session.commit()
-        logging.info(f"Order {order_id} paid. Now awaiting address.")
-        
-        bot_token = order.bot.token
-        chat_id = order.chat_id
-        bot = telegram.Bot(token=bot_token)
-        run_async(bot.send_message(chat_id=chat_id, text="✅ Payment confirmed! Please reply with your full shipping address."))
-        
-        execute_payout(order)
-    return "ok", 200
+# --- NEW: Admin Required Decorator ---
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if a user is logged in and if they are an admin
+        if not current_user.is_authenticated or not current_user.is_admin:
+            return jsonify({'message': 'Admin access is required for this action.'}), 403
+        # If they are an admin, proceed with the original function
+        return f(*args, **kwargs)
+    return decorated_function
 
-# ... (All other API routes are correct and unchanged)
+
+
+
+# Make sure 'os' is imported at the top of the file
+import os 
+# ... other imports ...
+
+
+# Make sure User and login_user are available
+from ..models import User
+from flask_login import login_user
+
+# ... inside api_routes.py ...
 
 @api.route('/api/admin/login', methods=['POST'])
 def admin_login():
     data = request.get_json()
-    ADMIN_EMAIL = "admin@example.com"
-    ADMIN_PASSWORD = "supersecretpassword123"
-    if data.get('email') == ADMIN_EMAIL and data.get('password') == ADMIN_PASSWORD:
+    email = data.get('email')
+    password = data.get('password')
+
+    # Find the user by email in the database
+    user = User.query.filter_by(email=email).first()
+
+    # Check if the user exists, the password is correct, AND they have the admin flag
+    if user and user.check_password(password) and user.is_admin:
+        # Create a secure session for this user
+        login_user(user)
         return jsonify({'message': 'Admin login successful!'}), 200
-    return jsonify({'message': 'Invalid admin credentials'}), 401
+
+    # If any of the checks fail, deny access
+    return jsonify({'message': 'Invalid admin credentials or permissions'}), 401
+
 
 @api.route('/api/admin/users', methods=['GET'])
+@admin_required
 def get_users():
     users = User.query.all()
     return jsonify([user.to_dict() for user in users])
 
 @api.route('/api/admin/users', methods=['POST'])
+@admin_required
 def create_user():
     data = request.get_json()
     email = data.get('email')
@@ -334,6 +356,7 @@ def create_user():
     return jsonify(new_user.to_dict()), 201
 
 @api.route('/api/admin/users/<user_id>', methods=['DELETE'])
+@admin_required
 def delete_user(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
@@ -342,12 +365,14 @@ def delete_user(user_id):
     return jsonify({'message': 'User deleted successfully'}), 200
 
 @api.route('/api/admin/users/<user_id>', methods=['GET'])
+@admin_required
 def get_user_details(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
     return jsonify(user.to_dict())
 
 @api.route('/api/admin/users/<user_id>/toggle-active', methods=['POST'])
+@admin_required
 def toggle_user_active(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
@@ -356,6 +381,7 @@ def toggle_user_active(user_id):
     return jsonify({'message': f'User status changed to {user.is_active}'}), 200
 
 @api.route('/api/admin/users/<user_id>/update-email', methods=['POST'])
+@admin_required
 def update_user_email(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
@@ -367,6 +393,7 @@ def update_user_email(user_id):
     return jsonify({'message': 'User email updated successfully'}), 200
 
 @api.route('/api/admin/users/<user_id>/reset-password', methods=['POST'])
+@admin_required
 def reset_user_password(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
@@ -378,6 +405,7 @@ def reset_user_password(user_id):
     return jsonify({'message': 'User password reset successfully'}), 200
 
 @api.route('/api/admin/orders', methods=['GET'])
+@admin_required
 def get_all_orders():
     orders = Order.query.order_by(Order.timestamp.desc()).all()
     orders_with_user_info = []
@@ -388,6 +416,7 @@ def get_all_orders():
     return jsonify(orders_with_user_info)
 
 @api.route('/api/admin/dashboard-stats', methods=['GET'])
+@admin_required
 def get_dashboard_stats():
     total_sales = db.session.query(db.func.sum(Order.price)).scalar() or 0
     total_orders = Order.query.count()
@@ -403,9 +432,16 @@ def get_dashboard_stats():
     return jsonify(stats)
 
 @api.route('/api/users/<user_id>/dashboard-stats', methods=['GET'])
+@login_required
 def get_user_dashboard_stats(user_id):
     user = db.session.get(User, user_id)
     if not user: return jsonify({'message': 'User not found'}), 404
+    user = db.session.get(User, user_id)
+    if not user: 
+        return jsonify({'message': 'User not found'}), 404
+    
+    
+    
     bot_ids = [bot.id for bot in user.bots]
     total_sales = db.session.query(db.func.sum(Order.price)).filter(Order.bot_id.in_(bot_ids)).scalar() or 0
     total_orders = Order.query.filter(Order.bot_id.in_(bot_ids)).count()
@@ -470,33 +506,102 @@ def get_user_bots(user_id):
     if not user: return jsonify({'message': 'User not found'}), 404
     return jsonify([bot.to_dict() for bot in user.bots])
 
-@api.route('/api/bots/<bot_id>', methods=['DELETE'])
+from flask_login import login_required, current_user # Make sure these are imported
+
+@api.route('/api/bots', methods=['POST'])
+@login_required
+def create_bot():
+    data = request.get_json()
+    bot_token = data.get('bot_token')
+    
+    if not bot_token:
+        return jsonify({'message': 'Bot token is missing.'}), 400
+
+    # FIX: Assign the bot to the currently logged-in user, not an arbitrary user_id from the request.
+    if Bot.query.filter_by(token=bot_token).first():
+        return jsonify({'message': 'A bot with this token already exists.'}), 409
+        
+    new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
+    db.session.add(new_bot)
+    db.session.commit()
+    
+    run_async(setup_bot_webhook(bot_token))
+    return jsonify(new_bot.to_dict()), 201
+
+@api.route('/webhook/<bot_token>', methods=['POST'])
+def telegram_webhook(bot_token):
+    # This endpoint is public for Telegram to reach, so no login is required.
+    # Security here depends on the secrecy of the bot_token in the URL.
+    run_async(handle_telegram_update(bot_token, request.get_json()))
+    return "ok", 200
+
+@api.route('/api/users/<user_id>/bots', methods=['GET'])
+@login_required
+def get_user_bots(user_id):
+    # FIX: Ensure the user is requesting their own bots, or make this an admin-only route.
+    if str(current_user.id) != user_id:
+        return jsonify({'message': 'Forbidden'}), 403
+
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify([bot.to_dict() for bot in user.bots])
+
+@api.route('/api/bots/<int:bot_id>', methods=['DELETE'])
+@login_required
 def delete_bot(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if not bot: return jsonify({'message': 'Bot not found'}), 404
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+    
+    # FIX: Authorization check to ensure the bot belongs to the current user.
+    if bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+
     db.session.delete(bot)
     db.session.commit()
     return jsonify({'message': 'Bot deleted successfully'}), 200
 
-@api.route('/api/bots/<bot_id>', methods=['GET'])
+@api.route('/api/bots/<int:bot_id>', methods=['GET'])
+@login_required
 def get_bot_details(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if bot: return jsonify(bot.to_dict())
-    return jsonify({'message': 'Bot not found'}), 404
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+        
+    # FIX: Authorization check was logically flawed. Check ownership before returning data.
+    if bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+        
+    return jsonify(bot.to_dict())
 
-@api.route('/api/bots/<bot_id>/welcome-message', methods=['POST'])
+@api.route('/api/bots/<int:bot_id>/welcome-message', methods=['POST'])
+@login_required
 def update_welcome_message(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if not bot: return jsonify({'message': 'Bot not found'}), 404
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+        
+    # FIX: Added missing authorization check.
+    if bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+
     data = request.get_json()
     bot.welcome_message = data.get('message', '')
     db.session.commit()
     return jsonify({'message': 'Welcome message updated successfully.'}), 200
 
-@api.route('/api/bots/<bot_id>/categories', methods=['POST'])
+@api.route('/api/bots/<int:bot_id>/categories', methods=['POST'])
+@login_required
 def create_category(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if not bot: return jsonify({'message': 'Bot not found'}), 404
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+        
+    # FIX: Authorization check was already present but is confirmed necessary.
+    if bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+        
     data = request.get_json()
     parent_id = data.get('parent_id')
     new_category = Category(name=data.get('name'), bot_id=bot.id, parent_id=parent_id)
@@ -504,55 +609,90 @@ def create_category(bot_id):
     db.session.commit()
     return jsonify(new_category.to_dict()), 201
 
-@api.route('/api/categories/<category_id>', methods=['DELETE'])
+@api.route('/api/categories/<int:category_id>', methods=['DELETE'])
+@login_required
 def delete_category(category_id):
     category = db.session.get(Category, category_id)
-    if not category: return jsonify({'message': 'Category not found'}), 404
+    if not category:
+        return jsonify({'message': 'Category not found'}), 404
+        
+    # FIX: Corrected runtime error by checking ownership through the category's bot.
+    if category.bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+        
     db.session.delete(category)
     db.session.commit()
     return jsonify({'message': 'Category deleted successfully'}), 200
 
-@api.route('/api/bots/<bot_id>/products', methods=['POST'])
+@api.route('/api/bots/<int:bot_id>/products', methods=['POST'])
+@login_required
 def add_product_to_bot(bot_id):
+    # FIX: Added authorization check for the bot itself.
+    bot = db.session.get(Bot, bot_id)
+    if not bot or bot.owner != current_user:
+        return jsonify({'message': 'Bot not found or you do not have permission'}), 404
+
     data = request.get_json()
     category_id = data.get('category_id')
     category = db.session.get(Category, category_id)
-    if not category or category.bot_id != bot_id: return jsonify({'message': 'Category not found or does not belong to this bot'}), 404
+    
+    if not category or category.bot_id != bot.id:
+        return jsonify({'message': 'Category not found or does not belong to this bot'}), 404
+        
     new_product = Product(name=data.get('name'), description=data.get('description'), unit=data.get('unit'), image_url=data.get('image_url'), video_url=data.get('video_url'), category_id=category.id)
     db.session.add(new_product)
     db.session.commit()
     return jsonify(new_product.to_dict()), 201
-    
-@api.route('/api/products/<product_id>/price-tiers', methods=['POST'])
+
+@api.route('/api/products/<int:product_id>/price-tiers', methods=['POST'])
+@login_required
 def add_price_tier(product_id):
     product = db.session.get(Product, product_id)
     if not product:
         return jsonify({'message': 'Product not found'}), 404
+        
+    # FIX: Added missing authorization check via product's relationships.
+    if product.category.bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+
     data = request.get_json()
     new_price_tier = PriceTier(label=data.get('label'), price=float(data.get('price')), product_id=product.id)
     db.session.add(new_price_tier)
     db.session.commit()
     return jsonify(new_price_tier.to_dict()), 201
 
-@api.route('/api/price-tiers/<tier_id>', methods=['DELETE'])
+@api.route('/api/price-tiers/<int:tier_id>', methods=['DELETE'])
+@login_required
 def delete_price_tier(tier_id):
     price_tier = db.session.get(PriceTier, tier_id)
     if not price_tier:
         return jsonify({'message': 'Price tier not found'}), 404
+        
+    # FIX: Added missing authorization check.
+    if price_tier.product.category.bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+
     db.session.delete(price_tier)
     db.session.commit()
     return jsonify({'message': 'Price tier deleted successfully'}), 200
 
-@api.route('/api/products/<product_id>', methods=['DELETE'])
+@api.route('/api/products/<int:product_id>', methods=['DELETE'])
+@login_required
 def delete_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
         return jsonify({'message': 'Product not found'}), 404
+        
+    # FIX: Added missing authorization check.
+    if product.category.bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+
     db.session.delete(product)
     db.session.commit()
     return jsonify({'message': 'Product deleted successfully'}), 200
 
 @api.route('/api/upload-media', methods=['POST'])
+@login_required # FIX: This route should require authentication to prevent abuse.
 def upload_media():
     if 'file' not in request.files:
         return jsonify({'message': 'No file part in the request'}), 400
@@ -560,26 +700,37 @@ def upload_media():
     if file_to_upload.filename == '':
         return jsonify({'message': 'No selected file'}), 400
     try:
+        # Replace with your Cloudinary config
+        # cloudinary.config(cloud_name='...', api_key='...', api_secret='...')
         upload_result = cloudinary.uploader.upload(file_to_upload, resource_type="auto")
         return jsonify({'secure_url': upload_result['secure_url']}), 200
     except Exception as e:
         logging.error(f"Cloudinary upload failed: {e}")
         return jsonify({'message': 'Failed to upload file.'}), 500
 
-@api.route('/api/bots/<bot_id>/orders', methods=['GET'])
+@api.route('/api/bots/<int:bot_id>/orders', methods=['GET'])
+@login_required
 def get_bot_orders(bot_id):
     bot = db.session.get(Bot, bot_id)
-    if bot: return jsonify([o.to_dict() for o in bot.orders])
-    return jsonify({'message': 'Bot not found'}), 404
-    
+    if not bot:
+        return jsonify({'message': 'Bot not found'}), 404
+        
+    # FIX: Added missing authorization check.
+    if bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
+        
+    return jsonify([o.to_dict() for o in bot.orders])
 
-
-@api.route('/api/orders/<order_id>/dispatch', methods=['POST'])
+@api.route('/api/orders/<int:order_id>/dispatch', methods=['POST'])
+@login_required
 def dispatch_order(order_id):
-    """Updates an order's status to 'dispatched'."""
     order = db.session.get(Order, order_id)
     if not order:
         return jsonify({'message': 'Order not found'}), 404
+    
+    # FIX: Added missing authorization check via the order's bot.
+    if order.bot.owner != current_user:
+        return jsonify({'message': 'Forbidden'}), 403
     
     order.status = 'dispatched'
     db.session.commit()

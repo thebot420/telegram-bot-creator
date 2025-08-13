@@ -1,4 +1,28 @@
 document.addEventListener('DOMContentLoaded', () => {
+
+    // --- Reusable Helper Function for API Errors ---
+    async function handleApiError(response) {
+        if (response.status === 401) {
+            alert("Your session has expired. Please log in again.");
+            window.location.href = '/';
+            return null;
+        }
+        if (response.status === 403) {
+            alert("Error: You do not have permission to perform this action.");
+            return null;
+        }
+        if (!response.ok) {
+            const errorData = await response.json();
+            alert(`An error occurred: ${errorData.message}`);
+            return null;
+        }
+        // For DELETE requests or other actions that don't return JSON
+        if (response.headers.get("content-length") === "0") {
+            return true; 
+        }
+        return response.json();
+    }
+
     // --- Get all necessary elements ---
     const pageTitle = document.getElementById('orders-title');
     const backToManageLink = document.getElementById('back-to-manage-link');
@@ -23,13 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Functions ---
-
-    // Renders a single order row in the table
     function renderOrder(order) {
         const orderRow = document.createElement('tr');
         const orderDate = new Date(order.timestamp).toLocaleString();
-
-        // Use empty strings as placeholders if data is not available
         const username = order.telegram_username ? `@${order.telegram_username}` : 'N/A';
         const address = order.shipping_address || 'N/A';
         const note = order.customer_note || 'None';
@@ -47,7 +67,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const actionsCell = orderRow.querySelector('.actions-cell');
         
-        // Only show the "Mark as Dispatched" button if the order has been paid
         if (order.status === 'paid') {
             const dispatchButton = document.createElement('button');
             dispatchButton.className = 'btn-primary btn-small';
@@ -57,34 +76,34 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (order.status === 'dispatched') {
             actionsCell.textContent = '✅ Dispatched';
         }
-
-
         ordersListBody.appendChild(orderRow);
     }
 
-    // --- API Call Functions ---
+    // --- UPDATED API Call Functions ---
     async function markAsDispatched(orderId, buttonElement) {
-        const response = await fetch(`/api/orders/${orderId}/dispatch`, {
-            method: 'POST'
-        });
+        try {
+            const response = await fetch(`/api/orders/${orderId}/dispatch`, {
+                method: 'POST'
+            });
+            const success = await handleApiError(response); // <-- Use the helper
 
-        if (response.ok) {
-            buttonElement.parentElement.textContent = '✅ Dispatched';
-        } else {
-            alert('Failed to update order status.');
+            if (success) {
+                buttonElement.parentElement.textContent = '✅ Dispatched';
+            }
+        } catch (error) {
+            console.error('Error dispatching order:', error);
+            alert('A network error occurred.');
         }
     }
 
-    // Fetches all orders for this specific bot
     async function fetchBotOrders() {
         if (!botId) return;
         try {
             const response = await fetch(`/api/bots/${botId}/orders`);
-            if (response.ok) {
-                const orders = await response.json();
-                
-                ordersListBody.innerHTML = ''; // Clear previous list
-                
+            const orders = await handleApiError(response); // <-- Use the helper
+            
+            if (orders) {
+                ordersListBody.innerHTML = '';
                 if (orders.length > 0) {
                     noOrdersMessage.classList.add('hidden');
                     orders.forEach(order => renderOrder(order));
@@ -97,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Set the page title and load the initial data
+    // --- Initial Load ---
     pageTitle.textContent = `Orders for Bot (...${botId.slice(-6)})`;
     fetchBotOrders();
 });

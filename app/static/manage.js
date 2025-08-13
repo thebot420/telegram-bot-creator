@@ -1,71 +1,29 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DEBUG: manage.js script has started.");
 
-    // --- Get all necessary elements ---
-    const addProductForm = document.getElementById('add-product-form');
-    console.log("DEBUG: addProductForm element:", addProductForm); // Check if the form is found
-
-    // --- Event Listeners ---
-    if (addProductForm) {
-        console.log("DEBUG: Attaching event listener to the product form.");
-        addProductForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            console.log("DEBUG: 'Save Product & Add Pricing' button was clicked.");
-
-            try {
-                const categoryId = document.getElementById('product-category').value;
-                const productName = document.getElementById('product-name').value;
-                const productDesc = document.getElementById('product-description').value;
-                const productUnit = document.getElementById('product-unit').value;
-                const imageUrl = document.getElementById('product-image-url') ? document.getElementById('product-image-url').value : null;
-                const videoUrl = document.getElementById('product-video-url') ? document.getElementById('product-video-url').value : null;
-
-                console.log("DEBUG: Form data collected:", { categoryId, productName });
-
-                const productData = {
-                    category_id: categoryId,
-                    name: productName,
-                    description: productDesc,
-                    unit: productUnit,
-                    image_url: uploadedFileUrl || imageUrl, // Use uploaded file first
-                    video_url: videoUrl,
-                };
-
-                console.log("DEBUG: Sending data to server:", productData);
-
-                const response = await fetch(`/api/bots/${botId}/products`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(productData)
-                });
-
-                console.log("DEBUG: Received response from server with status:", response.status);
-
-                if (response.ok) {
-                    const newProduct = await response.json();
-                    console.log("DEBUG: Product created successfully:", newProduct);
-                    addProductForm.reset();
-                    if (window.pond) pond.removeFiles();
-                    uploadedFileUrl = null;
-                    openPriceTierModal(newProduct.id, newProduct.name, []);
-                    loadBotData();
-                } else {
-                    const error = await response.json();
-                    console.error("DEBUG: Server responded with an error:", error.message);
-                    alert(`Failed to add product: ${error.message}`);
-                }
-            } catch (error) {
-                console.error("DEBUG: A critical JavaScript error occurred:", error);
-                alert("A critical error occurred. Please check the console.");
-            }
-        });
-    } else {
-        console.error("DEBUG: CRITICAL ERROR - Could not find the add-product-form!");
+    // --- Reusable Helper Function for API Errors ---
+    async function handleApiError(response) {
+        if (response.status === 401) {
+            alert("Your session has expired. Please log in again.");
+            window.location.href = '/';
+            return null;
+        }
+        if (response.status === 403) {
+            alert("Error: You do not have permission for this action.");
+            return null;
+        }
+        // For successful actions that don't return data (like DELETE)
+        if (response.ok && (response.headers.get("content-length") === "0" || response.status === 204)) {
+            return true;
+        }
+        if (!response.ok) {
+            const errorData = await response.json();
+            alert(`An error occurred: ${errorData.message}`);
+            return null;
+        }
+        return response.json();
     }
 
-    // --- All other functions from the file go here ---
-    // (I have included the full file content below for simplicity)
-
+    // --- Get all necessary elements ---
     const pageTitle = document.getElementById('manage-bot-title');
     const viewOrdersLink = document.getElementById('view-orders-link');
     const welcomeMessageForm = document.getElementById('welcome-message-form');
@@ -74,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noCategoriesMessage = document.getElementById('no-categories-message');
     const addMainCategoryForm = document.getElementById('add-main-category-form');
     const productCategorySelect = document.getElementById('product-category');
+    const addProductForm = document.getElementById('add-product-form');
     const productListDisplayDiv = document.getElementById('product-list-display');
     const logoutButton = document.getElementById('logout-button');
     const priceTierModal = document.getElementById('price-tier-modal');
@@ -81,58 +40,55 @@ document.addEventListener('DOMContentLoaded', () => {
     const existingTiersList = document.getElementById('existing-tiers-list');
     const addPriceTierForm = document.getElementById('add-price-tier-form');
     const closePriceModalButton = document.getElementById('close-price-modal-button');
+
     let currentProductIdForTiers = null;
     const pathParts = window.location.pathname.split('/');
     const botId = pathParts[pathParts.length - 1];
     let uploadedFileUrl = null;
 
-    // Initialize FilePond if it exists
+    // --- Initialize FilePond ---
     const inputElement = document.querySelector('input[type="file"]');
     if (window.FilePond && inputElement) {
         const pond = FilePond.create(inputElement);
-        window.pond = pond; // Make it globally accessible for clearing
+        window.pond = pond;
         FilePond.setOptions({
             server: '/api/upload-media',
             name: 'file',
         });
         pond.on('processfile', (error, file) => {
-            if (error) {
-                console.error('FilePond server error:', error);
-                return;
-            }
+            if (error) { console.error('FilePond server error:', error); return; }
             const response = JSON.parse(file.serverId);
             uploadedFileUrl = response.secure_url;
         });
     }
 
-    if (logoutButton) {
-        logoutButton.addEventListener('click', () => {
-            localStorage.removeItem('userId');
-            window.location.href = '/';
-        });
-    }
-
+    // --- Main Data Loading Function (UPDATED) ---
     async function loadBotData() {
         if (!botId) return;
         try {
             const response = await fetch(`/api/bots/${botId}`);
-            if (!response.ok) return;
-            const bot = await response.json();
-            pageTitle.textContent = `Manage Bot (...${bot.id.slice(-6)})`;
-            if (viewOrdersLink) viewOrdersLink.href = `/orders/${bot.id}`;
-            welcomeMessageTextarea.value = bot.welcome_message;
-            renderCategoryTree(bot.categories);
-            renderAllProducts(bot.categories);
+            const bot = await handleApiError(response);
+            if (bot) {
+                pageTitle.textContent = `Manage Bot (...${bot.id.slice(-6)})`;
+                if (viewOrdersLink) viewOrdersLink.href = `/orders/${bot.id}`;
+                welcomeMessageTextarea.value = bot.welcome_message;
+                renderCategoryTree(bot.categories);
+                renderAllProducts(bot.categories);
+            }
         } catch (error) {
             console.error('Failed to load bot data:', error);
         }
     }
 
+    // --- Rendering Functions (UNCHANGED) ---
     function renderCategoryTree(categories) {
         categoryManagerDiv.innerHTML = '';
         productCategorySelect.innerHTML = '<option value="">-- Select a Category --</option>';
         if (categories.length === 0) {
-            if(noCategoriesMessage) categoryManagerDiv.appendChild(noCategoriesMessage);
+            if (noCategoriesMessage) {
+                noCategoriesMessage.style.display = 'block';
+                categoryManagerDiv.appendChild(noCategoriesMessage);
+            }
         } else {
             if (noCategoriesMessage) noCategoriesMessage.style.display = 'none';
             categories.forEach(category => {
@@ -243,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span>${tier.label} - £${tier.price.toFixed(2)}</span>
                     <button class="delete-tier-btn" data-id="${tier.id}">&times;</button>
                 `;
-                tierEl.querySelector('.delete-tier-btn').addEventListener('click', () => deletePriceTier(tier.id, tier.label, tierEl));
+                tierEl.querySelector('.delete-tier-btn').addEventListener('click', () => deletePriceTier(tier.id, tier.label));
                 existingTiersList.appendChild(tierEl);
             });
         } else {
@@ -252,53 +208,77 @@ document.addEventListener('DOMContentLoaded', () => {
         priceTierModal.classList.remove('hidden');
     }
 
+    // --- API Call Functions (All UPDATED) ---
     async function deleteCategory(categoryId, categoryName) {
         if (confirm(`Are you sure you want to delete "${categoryName}" and all its contents?`)) {
-            await fetch(`/api/categories/${categoryId}`, { method: 'DELETE' });
-            loadBotData();
+            try {
+                const response = await fetch(`/api/categories/${categoryId}`, { method: 'DELETE' });
+                const success = await handleApiError(response);
+                if (success) {
+                    loadBotData();
+                }
+            } catch (error) { console.error(error); }
         }
     }
 
     async function createSubCategory(name, parentId) {
-        await fetch(`/api/bots/${botId}/categories`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, parent_id: parentId })
-        });
-        loadBotData();
+        try {
+            const response = await fetch(`/api/bots/${botId}/categories`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, parent_id: parentId })
+            });
+            const result = await handleApiError(response);
+            if (result) {
+                loadBotData();
+            }
+        } catch (error) { console.error(error); }
     }
 
-    async function deletePriceTier(tierId, tierLabel, elementToRemove) {
+    async function deletePriceTier(tierId, tierLabel) {
         if (confirm(`Are you sure you want to delete the price option "${tierLabel}"?`)) {
-            const response = await fetch(`/api/price-tiers/${tierId}`, { method: 'DELETE' });
-            if (response.ok) {
-                elementToRemove.remove();
-            } else {
-                alert('Failed to delete price option.');
-            }
+            try {
+                const response = await fetch(`/api/price-tiers/${tierId}`, { method: 'DELETE' });
+                const success = await handleApiError(response);
+                if (success) {
+                    loadBotData(); // Reload all data to refresh the modal state
+                }
+            } catch (error) { console.error(error); }
         }
     }
 
     async function deleteProduct(productId, productName) {
         if (confirm(`Are you sure you want to delete the product "${productName}"?`)) {
-            const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
-            if (response.ok) {
-                loadBotData();
-            } else {
-                alert('Failed to delete product.');
-            }
+            try {
+                const response = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+                const success = await handleApiError(response);
+                if (success) {
+                    loadBotData();
+                }
+            } catch (error) { console.error(error); }
         }
+    }
+
+    // --- Event Listeners (All UPDATED) ---
+    if (logoutButton) {
+        logoutButton.addEventListener('click', () => {
+            localStorage.removeItem('userId');
+            window.location.href = '/';
+        });
     }
 
     if (welcomeMessageForm) {
         welcomeMessageForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const response = await fetch(`/api/bots/${botId}/welcome-message`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: welcomeMessageTextarea.value })
-            });
-            alert(response.ok ? 'Welcome message saved!' : 'Failed to save message.');
+            try {
+                const response = await fetch(`/api/bots/${botId}/welcome-message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: welcomeMessageTextarea.value })
+                });
+                const result = await handleApiError(response);
+                if (result) alert('Welcome message saved!');
+            } catch (error) { console.error(error); }
         });
     }
     
@@ -306,13 +286,46 @@ document.addEventListener('DOMContentLoaded', () => {
         addMainCategoryForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const input = document.getElementById('main-category-name');
-            await fetch(`/api/bots/${botId}/categories`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: input.value, parent_id: null })
-            });
-            input.value = '';
-            loadBotData();
+            try {
+                const response = await fetch(`/api/bots/${botId}/categories`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: input.value, parent_id: null })
+                });
+                const result = await handleApiError(response);
+                if (result) {
+                    input.value = '';
+                    loadBotData();
+                }
+            } catch (error) { console.error(error); }
+        });
+    }
+
+    if (addProductForm) {
+        addProductForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const productData = {
+                category_id: document.getElementById('product-category').value,
+                name: document.getElementById('product-name').value,
+                description: document.getElementById('product-description').value,
+                unit: document.getElementById('product-unit').value,
+                image_url: uploadedFileUrl,
+            };
+            try {
+                const response = await fetch(`/api/bots/${botId}/products`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+                const newProduct = await handleApiError(response);
+                if (newProduct) {
+                    addProductForm.reset();
+                    if (window.pond) pond.removeFiles();
+                    uploadedFileUrl = null;
+                    openPriceTierModal(newProduct.id, newProduct.name, []);
+                    loadBotData();
+                }
+            } catch (error) { console.error(error); }
         });
     }
 
@@ -323,37 +336,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 label: document.getElementById('tier-label').value,
                 price: document.getElementById('tier-price').value
             };
-            const response = await fetch(`/api/products/${currentProductIdForTiers}/price-tiers`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(tierData)
-            });
-            if (response.ok) {
-                addPriceTierForm.reset();
-                const newTier = await response.json();
-                const tierEl = document.createElement('div');
-                tierEl.className = 'price-tier-item';
-                tierEl.innerHTML = `
-                    <span>${newTier.label} - £${newTier.price.toFixed(2)}</span>
-                    <button class="delete-tier-btn" data-id="${newTier.id}">&times;</button>
-                `;
-                tierEl.querySelector('.delete-tier-btn').addEventListener('click', () => deletePriceTier(newTier.id, newTier.label, tierEl));
-                if (existingTiersList.querySelector('p')) {
-                    existingTiersList.innerHTML = '';
+            try {
+                const response = await fetch(`/api/products/${currentProductIdForTiers}/price-tiers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(tierData)
+                });
+                const newTier = await handleApiError(response);
+                if (newTier) {
+                    addPriceTierForm.reset();
+                    // Just reload all data to ensure modal is fresh
+                    loadBotData(); 
                 }
-                existingTiersList.appendChild(tierEl);
-            } else {
-                alert('Failed to add price option.');
-            }
+            } catch (error) { console.error(error); }
         });
     }
 
-    if(closePriceModalButton) {
+    if (closePriceModalButton) {
         closePriceModalButton.addEventListener('click', () => {
             priceTierModal.classList.add('hidden');
-            loadBotData();
         });
     }
 
+    // --- Initial Load ---
     loadBotData();
 });

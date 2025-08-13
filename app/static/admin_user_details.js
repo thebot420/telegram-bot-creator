@@ -1,4 +1,29 @@
 document.addEventListener('DOMContentLoaded', () => {
+    
+    // --- Helper Function for Admin API Errors ---
+    async function handleApiError(response) {
+        // Redirect to ADMIN login on 401
+        if (response.status === 401) {
+            alert("Your session has expired. Please log in again.");
+            window.location.href = '/admin'; // <-- Key change for admin pages
+            return null;
+        }
+        if (response.status === 403) {
+            alert("Error: You do not have permission for this action.");
+            return null;
+        }
+        if (!response.ok) {
+            const errorData = await response.json();
+            const errorMessageEl = document.getElementById('error-message');
+            if (errorMessageEl) {
+                errorMessageEl.textContent = errorData.message || 'An unknown error occurred.';
+            } else {
+                alert(`An error occurred: ${errorData.message}`);
+            }
+            return null;
+        }
+        return response.json();
+    }
     // --- Get all necessary elements ---
     const pageTitle = document.getElementById('user-details-title');
     const botsListDiv = document.getElementById('user-bots-list');
