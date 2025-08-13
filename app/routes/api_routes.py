@@ -291,6 +291,7 @@ from functools import wraps # Make sure this is imported
 from flask_login import current_user # Make sure this is imported
 # ... other imports
 
+<<<<<<< HEAD
 # --- NEW: Admin Required Decorator ---
 def admin_required(f):
     @wraps(f)
@@ -315,6 +316,9 @@ from ..models import User
 from flask_login import login_user
 
 # ... inside api_routes.py ...
+=======
+# ... (All other API routes are correct and unchanged)
+>>>>>>> 353eb221720acfff6212649059735f4b02b32cb3
 
 @api.route('/api/admin/login', methods=['POST'])
 def admin_login():
