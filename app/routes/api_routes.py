@@ -129,22 +129,6 @@ def generate_currency_keyboard(page=1, cart_id=None):
 
 
 # --- TELEGRAM & PAYMENT FUNCTIONS ---
-async def setup_bot_webhook(bot_token):
-    logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
-    bot = telegram.Bot(token=bot_token)
-    webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
-    try:
-        await bot.set_webhook(webhook_url)
-        logging.info(f"--- SUCCESS: Webhook set for {bot_token[:10]}... ---")
-    except Exception as e:
-        logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
-
-def execute_payout(order):
-    pass
-async def send_cart_view(bot, chat_id, message_id, bot_id):
-    # ... (your existing send_cart_view logic)
-    pass
-
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- RAW UPDATE RECEIVED: {update_data} ---")
     bot = telegram.Bot(token=bot_token)
@@ -169,12 +153,105 @@ async def handle_telegram_update(bot_token, update_data):
             action = parts[0]
             item_id = parts[1] if len(parts) > 1 else None
 
-            # ... (your existing actions for main_menu, browse_products, view_category, add_cart, remove_item, clear_cart) ...
+            if action == 'main_menu':
+                cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                cart_id = cart.id if cart else 'new'
+                keyboard = [
+                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
+                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                    [InlineKeyboardButton("🛒 View Cart", callback_data=f"view_cart:{cart_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
 
-            if action == 'view_cart':
+            elif action == 'browse_products':
+                main_categories = [c for c in bot_data.categories if c.parent_id is None]
+                if not main_categories:
+                    await query.edit_message_text(text="This shop has no categories yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
+                    return
+                
+                cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                cart_id = cart.id if cart else 'new'
+                keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in main_categories]
+                keyboard.append([InlineKeyboardButton("🛒 View Cart", callback_data=f"view_cart:{cart_id}"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(text="Please select a category:", reply_markup=reply_markup)
+
+            elif action == 'view_category':
+                category = db.session.get(Category, item_id)
+                if not category: return
+                
+                cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                cart_id = cart.id if cart else 'new'
+                back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
+                
+                if category.sub_categories:
+                    keyboard = [[InlineKeyboardButton(sc.name, callback_data=f"view_category:{sc.id}")] for sc in category.sub_categories]
+                    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_button_data), InlineKeyboardButton("🛒 View Cart", callback_data=f"view_cart:{cart_id}"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await query.edit_message_text(text=f"Sub-categories in {category.name}:", reply_markup=reply_markup)
+                elif category.products:
+                    await query.edit_message_text(text=f"Products in {category.name}:")
+                    for product in category.products:
+                        caption = f"**{product.name}**\n{product.description or ''}\n\n"
+                        keyboard = []
+                        for tier in product.price_tiers:
+                            caption += f"- {tier.label}: £{tier.price}\n"
+                            keyboard.append([InlineKeyboardButton(f"Add {tier.label} to Cart", callback_data=f"add_cart:{tier.id}")])
+                        
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        try:
+                            if product.image_url:
+                                await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
+                            else:
+                                await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+                        except telegram.error.BadRequest:
+                            await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+                    
+                    nav_keyboard = [[
+                        InlineKeyboardButton("⬅️ Back", callback_data=back_button_data),
+                        InlineKeyboardButton("🛒 View Cart", callback_data=f"view_cart:{cart_id}"),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
+                    ]]
+                    await bot.send_message(chat_id=chat_id, text="What would you like to do next?", reply_markup=InlineKeyboardMarkup(nav_keyboard))
+                else:
+                    await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
+            
+            elif action == 'add_cart':
+                price_tier = db.session.get(PriceTier, item_id)
+                if price_tier:
+                    cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+                    if not cart:
+                        cart = Cart(chat_id=str(chat_id), bot_id=bot_data.id)
+                        db.session.add(cart)
+                        db.session.flush()
+                    
+                    cart_item = CartItem.query.filter_by(cart_id=cart.id, price_tier_id=price_tier.id).first()
+                    if cart_item:
+                        cart_item.quantity += 1
+                    else:
+                        cart_item = CartItem(cart_id=cart.id, price_tier_id=price_tier.id, quantity=1)
+                        db.session.add(cart_item)
+                    db.session.commit()
+                    await bot.send_message(chat_id=chat_id, text=f"✅ '{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
+
+            elif action == 'view_cart':
                 await send_cart_view(bot, chat_id, message_id, bot_data.id)
 
-            # --- REBUILT CHECKOUT AND NEW PAGINATION LOGIC ---
+            elif action == 'remove_item':
+                cart_item = db.session.get(CartItem, item_id)
+                if cart_item:
+                    db.session.delete(cart_item)
+                    db.session.commit()
+                await send_cart_view(bot, chat_id, message_id, bot_data.id)
+            
+            elif action == 'clear_cart':
+                cart = db.session.get(Cart, item_id)
+                if cart:
+                    CartItem.query.filter_by(cart_id=cart.id).delete()
+                    db.session.commit()
+                await send_cart_view(bot, chat_id, message_id, bot_data.id)
+
             elif action == 'checkout':
                 logging.info("--- ENTERING CHECKOUT LOGIC ---")
                 cart = db.session.get(Cart, item_id)
@@ -219,7 +296,6 @@ async def handle_telegram_update(bot_token, update_data):
                     "pay_currency": selected_currency, "order_id": new_order.id,
                     "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"
                 }
-                # Use the correct endpoint for creating a payment
                 response = requests.post('https://api.nowpayments.io/v1/payment', headers=headers, json=payload)
                 
                 if response.ok:
@@ -270,15 +346,16 @@ async def handle_telegram_update(bot_token, update_data):
                 db.session.commit()
                 await bot.send_message(chat_id=chat_id, text="Thank you! Your order is complete and will be processed shortly.")
                 return
-
+            
+            cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
+            cart_id = cart.id if cart else 'new'
             keyboard = [
                 [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
                 [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-                [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
+                [InlineKeyboardButton("🛒 View Cart", callback_data=f"view_cart:{cart_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text=bot_data.welcome_message, reply_markup=reply_markup)
-
 
 # --- WEBHOOK ROUTES (Publicly Accessible) ---
 
