@@ -70,12 +70,10 @@ def get_available_currencies():
     logging.info("--- Fetching new currency list from NOWPayments... ---")
     try:
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-        # Use the correct endpoint for available payment currencies
         response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
         response.raise_for_status()
         
         data = response.json()
-        # Filter for currencies that are selectable
         available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('is_available')]
 
         currency_cache['currencies'] = available_currencies
@@ -92,7 +90,6 @@ def generate_currency_keyboard(page=1, cart_id=None):
     """
     all_currencies = get_available_currencies()
     if not all_currencies:
-        # Provide a fallback or error message
         return InlineKeyboardMarkup([[InlineKeyboardButton("Payment system unavailable.", callback_data="main_menu")]])
 
     items_per_page = 30
@@ -120,14 +117,12 @@ def generate_currency_keyboard(page=1, cart_id=None):
     if page > 1:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"view_currency_page:{page-1}:{cart_id}"))
     
-    # A non-clickable button to show the current page
     nav_row.append(InlineKeyboardButton(f"Page {page}/{total_pages}", callback_data="no_op"))
 
     if page < total_pages:
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"view_currency_page:{page+1}:{cart_id}"))
     
     keyboard.append(nav_row)
-    # Use the correct callback_data format for view_cart
     keyboard.append([InlineKeyboardButton("⬅️ Back to Cart", callback_data=f"view_cart:{cart_id}")])
 
     return InlineKeyboardMarkup(keyboard)
@@ -135,13 +130,17 @@ def generate_currency_keyboard(page=1, cart_id=None):
 
 # --- TELEGRAM & PAYMENT FUNCTIONS ---
 async def setup_bot_webhook(bot_token):
-    # ... (your existing setup_bot_webhook logic)
-    pass
+    logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
+    bot = telegram.Bot(token=bot_token)
+    webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
+    try:
+        await bot.set_webhook(webhook_url)
+        logging.info(f"--- SUCCESS: Webhook set for {bot_token[:10]}... ---")
+    except Exception as e:
+        logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
 
 def execute_payout(order):
-    # ... (your existing execute_payout logic)
     pass
-
 async def send_cart_view(bot, chat_id, message_id, bot_id):
     # ... (your existing send_cart_view logic)
     pass
