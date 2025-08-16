@@ -5,7 +5,7 @@ import requests
 import hmac
 import hashlib
 import json
-import time 
+import time
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, current_app
@@ -40,6 +40,13 @@ def run_async(coroutine):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coroutine)
 
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            return jsonify({'message': 'Admin access is required for this action.'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 # --- CACHING VARIABLES for NOWPayments Currencies ---
 currency_cache = {
@@ -56,81 +63,98 @@ def get_available_currencies():
     global currency_cache
     current_time = time.time()
 
-    # 1. Check if the cache is still valid
     if currency_cache['currencies'] and (current_time - currency_cache['last_updated'] < CACHE_DURATION):
         logging.info("--- Using cached currency list. ---")
         return currency_cache['currencies']
 
-    # 2. If cache is invalid or empty, fetch from API
     logging.info("--- Fetching new currency list from NOWPayments... ---")
     try:
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-        response = requests.get('https://api.nowpayments.io/v1/currencies', headers=headers)
-        response.raise_for_status() # Raise an exception for bad status codes
-
+        # Use the correct endpoint for available payment currencies
+        response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
+        response.raise_for_status()
+        
         data = response.json()
-        # We only want currencies that are selectable on an invoice
-        available_currencies = data.get('currencies', [])
+        # Filter for currencies that are selectable
+        available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('is_available')]
 
-        # 3. Update the cache
         currency_cache['currencies'] = available_currencies
         currency_cache['last_updated'] = current_time
-
+        
         return available_currencies
     except requests.exceptions.RequestException as e:
         logging.error(f"--- Failed to fetch currencies from NOWPayments: {e} ---")
-        # If the API fails, return the old cache if it exists, otherwise an empty list
         return currency_cache['currencies'] if currency_cache['currencies'] else []
 
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or not current_user.is_admin:
-            return jsonify({'message': 'Admin access is required for this action.'}), 403
-        return f(*args, **kwargs)
-    return decorated_function
+def generate_currency_keyboard(page=1, cart_id=None):
+    """
+    Creates a paginated keyboard of available currencies.
+    """
+    all_currencies = get_available_currencies()
+    if not all_currencies:
+        # Provide a fallback or error message
+        return InlineKeyboardMarkup([[InlineKeyboardButton("Payment system unavailable.", callback_data="main_menu")]])
+
+    items_per_page = 30
+    start_index = (page - 1) * items_per_page
+    end_index = start_index + items_per_page
+    
+    page_currencies = all_currencies[start_index:end_index]
+
+    keyboard = []
+    row = []
+    for currency in page_currencies:
+        row.append(InlineKeyboardButton(
+            currency.upper(), 
+            callback_data=f"select_currency:{currency}:{cart_id}"
+        ))
+        if len(row) == 5:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    nav_row = []
+    total_pages = (len(all_currencies) + items_per_page - 1) // items_per_page
+
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"view_currency_page:{page-1}:{cart_id}"))
+    
+    # A non-clickable button to show the current page
+    nav_row.append(InlineKeyboardButton(f"Page {page}/{total_pages}", callback_data="no_op"))
+
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"view_currency_page:{page+1}:{cart_id}"))
+    
+    keyboard.append(nav_row)
+    # Use the correct callback_data format for view_cart
+    keyboard.append([InlineKeyboardButton("⬅️ Back to Cart", callback_data=f"view_cart:{cart_id}")])
+
+    return InlineKeyboardMarkup(keyboard)
+
 
 # --- TELEGRAM & PAYMENT FUNCTIONS ---
 async def setup_bot_webhook(bot_token):
-    logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
-    bot = telegram.Bot(token=bot_token)
-    webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
-    try:
-        await bot.set_webhook(webhook_url)
-        logging.info(f"--- SUCCESS: Webhook set for {bot_token[:10]}... ---")
-    except Exception as e:
-        logging.error(f"--- ERROR: Failed to set webhook for {bot_token[:10]}. Reason: {e} ---")
+    # ... (your existing setup_bot_webhook logic)
+    pass
 
 def execute_payout(order):
+    # ... (your existing execute_payout logic)
     pass
 
 async def send_cart_view(bot, chat_id, message_id, bot_id):
-    cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
-    if not cart or not cart.items:
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Your shopping cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
-        return
-    cart_text = "🛒 **Your Shopping Cart**\n\n"
-    total_price = 0
-    keyboard = []
-    for item in cart.items:
-        item_total = item.quantity * item.price_tier.price
-        cart_text += f"- {item.quantity}x {item.price_tier.product.name} ({item.price_tier.label}) - £{item_total:.2f}\n"
-        total_price += item_total
-        keyboard.append([InlineKeyboardButton(f"❌ Remove {item.price_tier.label}", callback_data=f"remove_item:{item.id}")])
-    cart_text += f"\n**Total: £{total_price:.2f}**"
-    keyboard.append([InlineKeyboardButton("🗑️ Clear Cart", callback_data=f"clear_cart:{cart.id}")])
-    keyboard.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
-    keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
+    # ... (your existing send_cart_view logic)
+    pass
 
 async def handle_telegram_update(bot_token, update_data):
-    logging.info(f"--- Handling update for bot token: {bot_token[:10]}... ---")
+    logging.info(f"--- RAW UPDATE RECEIVED: {update_data} ---")
     bot = telegram.Bot(token=bot_token)
     update = telegram.Update.de_json(update_data, bot)
+    
     with current_app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
         if not bot_data or not bot_data.owner.is_active:
+            logging.warning("--- Update for inactive or non-existent bot. Aborting. ---")
             return
 
         if update.callback_query:
@@ -139,120 +163,30 @@ async def handle_telegram_update(bot_token, update_data):
             message_id = query.message.message_id
             data = query.data
             await query.answer()
+
+            logging.info(f"--- CALLBACK QUERY RECEIVED: {data} ---")
             
             parts = data.split(':')
             action = parts[0]
             item_id = parts[1] if len(parts) > 1 else None
 
-            if action == 'main_menu':
-                keyboard = [
-                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="browse_products")],
-                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(text=bot_data.welcome_message, reply_markup=reply_markup)
+            # ... (your existing actions for main_menu, browse_products, view_category, add_cart, remove_item, clear_cart) ...
 
-            elif action == 'browse_products':
-                main_categories = [c for c in bot_data.categories if c.parent_id is None]
-                if not main_categories:
-                    await query.edit_message_text(text="This shop has no categories yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]))
-                    return
-                keyboard = [[InlineKeyboardButton(c.name, callback_data=f"view_category:{c.id}")] for c in main_categories]
-                keyboard.append([InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(text="Please select a category:", reply_markup=reply_markup)
-
-            elif action == 'view_category':
-                category = db.session.get(Category, item_id)
-                if not category: return
-                
-                back_button_data = f"view_category:{category.parent_id}" if category.parent_id else "browse_products"
-                
-                if category.sub_categories:
-                    keyboard = [[InlineKeyboardButton(sc.name, callback_data=f"view_category:{sc.id}")] for sc in category.sub_categories]
-                    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_button_data), InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")])
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    await query.edit_message_text(text=f"Sub-categories in {category.name}:", reply_markup=reply_markup)
-                elif category.products:
-                    await query.edit_message_text(text=f"Products in {category.name}:")
-                    for product in category.products:
-                        caption = f"**{product.name}**\n{product.description or ''}\n\n"
-                        keyboard = []
-                        for tier in product.price_tiers:
-                            caption += f"- {tier.label}: £{tier.price}\n"
-                            keyboard.append([InlineKeyboardButton(f"Add {tier.label} to Cart", callback_data=f"add_cart:{tier.id}")])
-                        
-                        reply_markup = InlineKeyboardMarkup(keyboard)
-                        try:
-                            if product.image_url:
-                                await bot.send_photo(chat_id=chat_id, photo=product.image_url, caption=caption, reply_markup=reply_markup, parse_mode='Markdown')
-                            else:
-                                await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
-                        except telegram.error.BadRequest:
-                            await bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode='Markdown')
-                    
-                    nav_keyboard = [[
-                        InlineKeyboardButton("⬅️ Back", callback_data=back_button_data),
-                        InlineKeyboardButton("🛒 View Cart", callback_data="view_cart"),
-                        InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
-                    ]]
-                    await bot.send_message(chat_id=chat_id, text="What would you like to do next?", reply_markup=InlineKeyboardMarkup(nav_keyboard))
-                else:
-                    await query.edit_message_text(text=f"No products or sub-categories found in {category.name}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button_data)]]))
-            
-            elif action == 'add_cart':
-                price_tier = db.session.get(PriceTier, item_id)
-                if price_tier:
-                    cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).first()
-                    if not cart:
-                        cart = Cart(chat_id=str(chat_id), bot_id=bot_data.id)
-                        db.session.add(cart)
-                        db.session.flush()
-                    
-                    cart_item = CartItem.query.filter_by(cart_id=cart.id, price_tier_id=price_tier.id).first()
-                    if cart_item:
-                        cart_item.quantity += 1
-                    else:
-                        cart_item = CartItem(cart_id=cart.id, price_tier_id=price_tier.id, quantity=1)
-                        db.session.add(cart_item)
-                    db.session.commit()
-                    await bot.send_message(chat_id=chat_id, text=f"✅ '{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
-
-            elif action == 'view_cart':
+            if action == 'view_cart':
                 await send_cart_view(bot, chat_id, message_id, bot_data.id)
 
-            elif action == 'remove_item':
-                cart_item = db.session.get(CartItem, item_id)
-                if cart_item:
-                    db.session.delete(cart_item)
-                    db.session.commit()
-                await send_cart_view(bot, chat_id, message_id, bot_data.id)
-            
-            elif action == 'clear_cart':
-                cart = db.session.get(Cart, item_id)
-                if cart:
-                    CartItem.query.filter_by(cart_id=cart.id).delete()
-                    db.session.commit()
-                await send_cart_view(bot, chat_id, message_id, bot_data.id)
-
-                # --- 1. NEW CHECKOUT ACTION ---
-            # This now starts the currency selection process.
+            # --- REBUILT CHECKOUT AND NEW PAGINATION LOGIC ---
             elif action == 'checkout':
+                logging.info("--- ENTERING CHECKOUT LOGIC ---")
                 cart = db.session.get(Cart, item_id)
                 if not cart or not cart.items:
                     await query.edit_message_text(text="Your cart is empty.")
                     return
-
-                # Save the cart_id for the next steps
-                # We'll pass it along in the callback data
                 await query.edit_message_text(
                     text="Please select your payment currency.",
                     reply_markup=generate_currency_keyboard(cart_id=cart.id)
                 )
 
-            # --- 2. NEW PAGINATION HANDLER ---
-            # This handles the "Next" and "Previous" page buttons.
             elif action == 'view_currency_page':
                 page = int(parts[1])
                 cart_id = parts[2]
@@ -261,8 +195,6 @@ async def handle_telegram_update(bot_token, update_data):
                     reply_markup=generate_currency_keyboard(page=page, cart_id=cart_id)
                 )
 
-            # --- 3. NEW CURRENCY SELECTION HANDLER ---
-            # This is the final step where the payment is created.
             elif action == 'select_currency':
                 selected_currency = parts[1]
                 cart_id = parts[2]
@@ -275,25 +207,20 @@ async def handle_telegram_update(bot_token, update_data):
                 order_description = ", ".join([f"{item.quantity}x {item.price_tier.product.name} ({item.price_tier.label})" for item in cart.items])
 
                 new_order = Order(
-                    product_name=order_description,
-                    price=total_price,
-                    bot_id=cart.bot_id,
-                    chat_id=str(chat_id),
-                    telegram_username=query.from_user.username,
+                    product_name=order_description, price=total_price, bot_id=cart.bot_id,
+                    chat_id=str(chat_id), telegram_username=query.from_user.username,
                     status='awaiting_payment'
                 )
                 db.session.add(new_order)
                 db.session.commit()
 
-                # --- NEW API CALL to create a payment with the selected currency ---
                 headers = {'x-api-key': NOWPAYMENTS_API_KEY}
                 payload = {
-                    "price_amount": total_price,
-                    "price_currency": "usd", # Or your base currency
-                    "pay_currency": selected_currency, # The currency the user chose
-                    "order_id": new_order.id,
+                    "price_amount": total_price, "price_currency": "usd",
+                    "pay_currency": selected_currency, "order_id": new_order.id,
                     "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"
                 }
+                # Use the correct endpoint for creating a payment
                 response = requests.post('https://api.nowpayments.io/v1/payment', headers=headers, json=payload)
                 
                 if response.ok:
@@ -305,9 +232,11 @@ async def handle_telegram_update(bot_token, update_data):
                     payment_amount = payment_data.get('pay_amount')
                     
                     await query.edit_message_text(
-                        text=f"Please send exactly `{payment_amount}` {selected_currency.upper()} to the address below:\n\n`{payment_address}`"
+                        text=f"Please send exactly `{payment_amount}` {selected_currency.upper()} to the address below:\n\n`{payment_address}`",
+                        parse_mode='Markdown'
                     )
                 else:
+                    logging.error(f"NOWPayments API error: {response.text}")
                     await query.edit_message_text(text="Sorry, there was an error creating your payment. Please try again.")
             
             elif action == 'my_orders':
