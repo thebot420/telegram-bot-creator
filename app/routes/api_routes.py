@@ -5,6 +5,7 @@ import requests
 import hmac
 import hashlib
 import json
+import time 
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, current_app
@@ -38,6 +39,48 @@ def run_async(coroutine):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coroutine)
+
+
+# --- CACHING VARIABLES for NOWPayments Currencies ---
+currency_cache = {
+    'currencies': [],
+    'last_updated': 0
+}
+CACHE_DURATION = 3600 # Cache for 1 hour (3600 seconds)
+
+def get_available_currencies():
+    """
+    Fetches the list of available currencies from NOWPayments,
+    using a cache to avoid excessive API calls.
+    """
+    global currency_cache
+    current_time = time.time()
+
+    # 1. Check if the cache is still valid
+    if currency_cache['currencies'] and (current_time - currency_cache['last_updated'] < CACHE_DURATION):
+        logging.info("--- Using cached currency list. ---")
+        return currency_cache['currencies']
+
+    # 2. If cache is invalid or empty, fetch from API
+    logging.info("--- Fetching new currency list from NOWPayments... ---")
+    try:
+        headers = {'x-api-key': NOWPAYMENTS_API_KEY}
+        response = requests.get('https://api.nowpayments.io/v1/currencies', headers=headers)
+        response.raise_for_status() # Raise an exception for bad status codes
+
+        data = response.json()
+        # We only want currencies that are selectable on an invoice
+        available_currencies = data.get('currencies', [])
+
+        # 3. Update the cache
+        currency_cache['currencies'] = available_currencies
+        currency_cache['last_updated'] = current_time
+
+        return available_currencies
+    except requests.exceptions.RequestException as e:
+        logging.error(f"--- Failed to fetch currencies from NOWPayments: {e} ---")
+        # If the API fails, return the old cache if it exists, otherwise an empty list
+        return currency_cache['currencies'] if currency_cache['currencies'] else []
 
 def admin_required(f):
     @wraps(f)
@@ -193,18 +236,47 @@ async def handle_telegram_update(bot_token, update_data):
                     db.session.commit()
                 await send_cart_view(bot, chat_id, message_id, bot_data.id)
 
+                # --- 1. NEW CHECKOUT ACTION ---
+            # This now starts the currency selection process.
             elif action == 'checkout':
                 cart = db.session.get(Cart, item_id)
                 if not cart or not cart.items:
-                    await query.edit_message_text(text="Your cart is empty. Nothing to checkout.")
+                    await query.edit_message_text(text="Your cart is empty.")
                     return
-                
+
+                # Save the cart_id for the next steps
+                # We'll pass it along in the callback data
+                await query.edit_message_text(
+                    text="Please select your payment currency.",
+                    reply_markup=generate_currency_keyboard(cart_id=cart.id)
+                )
+
+            # --- 2. NEW PAGINATION HANDLER ---
+            # This handles the "Next" and "Previous" page buttons.
+            elif action == 'view_currency_page':
+                page = int(parts[1])
+                cart_id = parts[2]
+                await query.edit_message_text(
+                    text="Please select your payment currency.",
+                    reply_markup=generate_currency_keyboard(page=page, cart_id=cart_id)
+                )
+
+            # --- 3. NEW CURRENCY SELECTION HANDLER ---
+            # This is the final step where the payment is created.
+            elif action == 'select_currency':
+                selected_currency = parts[1]
+                cart_id = parts[2]
+                cart = db.session.get(Cart, cart_id)
+                if not cart:
+                    await query.edit_message_text(text="Error: Your cart could not be found.")
+                    return
+
                 total_price = sum(item.quantity * item.price_tier.price for item in cart.items)
                 order_description = ", ".join([f"{item.quantity}x {item.price_tier.product.name} ({item.price_tier.label})" for item in cart.items])
 
                 new_order = Order(
-                    product_name=order_description, 
-                    price=total_price, 
+                    product_name=order_description,
+                    price=total_price,
                     bot_id=cart.bot_id,
                     chat_id=str(chat_id),
                     telegram_username=query.from_user.username,
@@ -213,18 +285,30 @@ async def handle_telegram_update(bot_token, update_data):
                 db.session.add(new_order)
                 db.session.commit()
 
+                # --- NEW API CALL to create a payment with the selected currency ---
                 headers = {'x-api-key': NOWPAYMENTS_API_KEY}
-                payload = {"price_amount": total_price, "price_currency": "usd", "order_id": new_order.id, "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"}
-                response = requests.post('https://api.nowpayments.io/v1/invoice', headers=headers, json=payload)
+                payload = {
+                    "price_amount": total_price,
+                    "price_currency": "usd", # Or your base currency
+                    "pay_currency": selected_currency, # The currency the user chose
+                    "order_id": new_order.id,
+                    "ipn_callback_url": f"{SERVER_URL}/webhook/nowpayments"
+                }
+                response = requests.post('https://api.nowpayments.io/v1/payment', headers=headers, json=payload)
                 
                 if response.ok:
                     CartItem.query.filter_by(cart_id=cart.id).delete()
                     db.session.commit()
+                    
                     payment_data = response.json()
-                    invoice_url = payment_data.get('invoice_url')
-                    await query.edit_message_text(text=f"Thank you! Please complete your payment of £{total_price:.2f} using the secure link below:\n\n{invoice_url}")
+                    payment_address = payment_data.get('pay_address')
+                    payment_amount = payment_data.get('pay_amount')
+                    
+                    await query.edit_message_text(
+                        text=f"Please send exactly `{payment_amount}` {selected_currency.upper()} to the address below:\n\n`{payment_address}`"
+                    )
                 else:
-                    await query.edit_message_text(text="Sorry, there was an error creating your payment link. Please try again.")
+                    await query.edit_message_text(text="Sorry, there was an error creating your payment. Please try again.")
             
             elif action == 'my_orders':
                 orders = Order.query.filter_by(chat_id=str(chat_id), bot_id=bot_data.id).order_by(Order.timestamp.desc()).limit(10).all()
