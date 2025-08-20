@@ -72,8 +72,9 @@ def get_available_currencies():
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
         response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
         
-        # --- THIS IS THE CRITICAL LOG MESSAGE ---
-        logging.info(f"--- NOWPayments RAW Response: {response.text} ---")
+        # --- THIS IS THE CRITICAL CHANGE ---
+        # We are forcing this to be an "error" log so it will definitely show up.
+        logging.error(f"--- NOWPayments RAW Response: {response.text} ---")
         
         if not response.ok:
             response.raise_for_status()
