@@ -80,21 +80,22 @@ def get_available_currencies():
         # Filter the list
         available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('available_for_payment') is True]
 
-        # --- THIS IS THE NEW DEBUGGING LOG ---
-        # Log the result of the filtering to see if it's empty.
-        logging.error(f"--- Filtered Currencies Count: {len(available_currencies)} ---")
-        
-        # If the list is empty, log some examples to see why
-        if not available_currencies:
-            logging.error("--- First 3 currency objects from NOWPayments for debugging: ---")
-            for currency_obj in data.get('currencies', [])[:3]:
-                # This will show us the exact value and data type of the key we are checking
-                logging.error(f"Currency: {currency_obj.get('code')}, Available for Payment: {currency_obj.get('available_for_payment')}, Type: {type(currency_obj.get('available_for_payment'))}")
+        # --- THIS IS THE FIX ---
+        # Limit the list to the first 120 currencies to avoid Telegram limits.
+        limited_currencies = available_currencies[:120]
 
-        currency_cache['currencies'] = available_currencies
+        # Log the result of the filtering to see if it's empty.
+        logging.info(f"--- Found {len(available_currencies)} total, using {len(limited_currencies)} ---")
+        
+        currency_cache['currencies'] = limited_currencies
         currency_cache['last_updated'] = current_time
         
-        return available_currencies
+        return limited_currencies
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"--- Failed to fetch currencies from NOWPayments (RequestException): {e} ---")
+        return currency_cache['currencies'] if currency_cache['currencies'] else []
+
         
     except requests.exceptions.RequestException as e:
         logging.error(f"--- Failed to fetch currencies from NOWPayments (RequestException): {e} ---")
