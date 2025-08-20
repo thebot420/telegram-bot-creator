@@ -54,11 +54,10 @@ currency_cache = {
     'last_updated': 0
 }
 CACHE_DURATION = 3600 # Cache for 1 hour (3600 seconds)
-
 def get_available_currencies():
     """
     Fetches the list of available currencies from NOWPayments,
-    using a cache to avoid excessive API calls.
+    using a cache and enhanced logging for debugging.
     """
     global currency_cache
     current_time = time.time()
@@ -72,23 +71,35 @@ def get_available_currencies():
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
         response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
         
-        # Log the raw response for debugging if needed in the future
-        # logging.info(f"--- NOWPayments RAW Response: {response.text} ---")
-        
         if not response.ok:
+            logging.error(f"--- NOWPayments API Error: {response.status_code} {response.text} ---")
             response.raise_for_status()
 
         data = response.json()
         
-        # --- THIS IS THE FIX ---
-        # Explicitly check if the value is the boolean True.
+        # Filter the list
         available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('available_for_payment') is True]
+
+        # --- THIS IS THE NEW DEBUGGING LOG ---
+        # Log the result of the filtering to see if it's empty.
+        logging.error(f"--- Filtered Currencies Count: {len(available_currencies)} ---")
+        
+        # If the list is empty, log some examples to see why
+        if not available_currencies:
+            logging.error("--- First 3 currency objects from NOWPayments for debugging: ---")
+            for currency_obj in data.get('currencies', [])[:3]:
+                # This will show us the exact value and data type of the key we are checking
+                logging.error(f"Currency: {currency_obj.get('code')}, Available for Payment: {currency_obj.get('available_for_payment')}, Type: {type(currency_obj.get('available_for_payment'))}")
 
         currency_cache['currencies'] = available_currencies
         currency_cache['last_updated'] = current_time
         
         return available_currencies
         
+    except requests.exceptions.RequestException as e:
+        logging.error(f"--- Failed to fetch currencies from NOWPayments (RequestException): {e} ---")
+        return currency_cache['currencies'] if currency_cache['currencies'] else []
+
     except requests.exceptions.RequestException as e:
         logging.error(f"--- Failed to fetch currencies from NOWPayments (RequestException): {e} ---")
         return currency_cache['currencies'] if currency_cache['currencies'] else []
