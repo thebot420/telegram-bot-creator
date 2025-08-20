@@ -507,55 +507,29 @@ def create_bot():
     if Bot.query.filter_by(token=bot_token).first():
         return jsonify({'message': 'A bot with this token already exists.'}), 409
 
-    # --- THIS IS THE NEW, SAFER LOGIC ---
-    
-    # 1. Create the bot object but DON'T save it permanently yet.
-    new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
-    db.session.add(new_bot)
-    
+    # --- NEW, SAFER LOGIC ---
     try:
-        # 2. Try to set up the webhook with Telegram.
-        # We need to get the result of the async function.
-        success = run_async(setup_bot_webhook(bot_token))
-        
-        # The setup_bot_webhook function needs to return True or False.
-        # Let's assume for now it will throw an exception on failure.
-        
-        # 3. If the webhook is successful, save everything.
+        # 1. Verify the token with Telegram first
+        bot = telegram.Bot(token=bot_token)
+        bot_info = run_async(bot.get_me())
+        logging.info(f"--- Token is valid for bot: @{bot_info.username} ---")
+
+        # 2. If verification is successful, create the bot in the database
+        new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
+        db.session.add(new_bot)
         db.session.commit()
+
+        # 3. Now, set the webhook
+        run_async(setup_bot_webhook(bot_token))
+        
         logging.info(f"--- Successfully created and registered bot {new_bot.id} ---")
         return jsonify(new_bot.to_dict()), 201
 
     except Exception as e:
-        # 4. If the webhook fails, roll back the database change.
-        db.session.rollback()
-        logging.error(f"--- Webhook setup failed for token {bot_token[:10]}... Rolling back. Reason: {e} ---")
-        return jsonify({'message': 'Failed to create bot. The Telegram token is likely invalid or already in use by another bot.'}), 400
-    # --- THIS IS THE NEW, SAFER LOGIC ---
-    
-    # 1. Create the bot object but DON'T save it permanently yet.
-    new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
-    db.session.add(new_bot)
-    
-    try:
-        # 2. Try to set up the webhook with Telegram.
-        # We need to get the result of the async function.
-        success = run_async(setup_bot_webhook(bot_token))
-        
-        # The setup_bot_webhook function needs to return True or False.
-        # Let's assume for now it will throw an exception on failure.
-        
-        # 3. If the webhook is successful, save everything.
-        db.session.commit()
-        logging.info(f"--- Successfully created and registered bot {new_bot.id} ---")
-        return jsonify(new_bot.to_dict()), 201
-
-    except Exception as e:
-        # 4. If the webhook fails, roll back the database change.
-        db.session.rollback()
-        logging.error(f"--- Webhook setup failed for token {bot_token[:10]}... Rolling back. Reason: {e} ---")
-        return jsonify({'message': 'Failed to create bot. The Telegram token is likely invalid or already in use by another bot.'}), 400
-
+        # 4. If verification or webhook setup fails, give a clear error
+        logging.error(f"--- Bot creation failed for token {bot_token[:10]}... Reason: {e} ---")
+        # This error message will now be shown to the user in the dashboard
+        return jsonify({'message': 'Failed to create bot. The Telegram token is invalid or the bot is stopped. Please check the token with BotFather.'}), 400
 @api.route('/api/users/<string:user_id>/bots', methods=['GET'])
 @login_required
 def get_user_bots(user_id):
