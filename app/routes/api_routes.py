@@ -386,8 +386,10 @@ def telegram_webhook(bot_token):
 
 @api.route('/webhook/nowpayments', methods=['POST'])
 def nowpayments_webhook():
+    # --- 1. Securely Verify the Request (No changes here) ---
     signature = request.headers.get('x-nowpayments-sig')
-    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY: return "Configuration error", 400
+    if not signature or not NOWPAYMENTS_IPN_SECRET_KEY: 
+        return "Configuration error", 400
     try:
         sorted_payload = json.dumps(request.get_json(), sort_keys=True, separators=(',', ':')).encode('utf-8')
         expected_signature = hmac.new(NOWPAYMENTS_IPN_SECRET_KEY.encode('utf-8'), sorted_payload, hashlib.sha512).hexdigest()
@@ -395,18 +397,61 @@ def nowpayments_webhook():
             return "Invalid signature", 400
     except Exception as e:
         return "Verification error", 400
+    
+    # --- 2. Get Data from NOWPayments ---
     data = request.get_json()
     order_id = data.get('order_id')
     payment_status = data.get('payment_status')
+    
+    # --- 3. Find the Order and Check Status ---
     order = db.session.get(Order, order_id)
-    if order and payment_status == 'finished' and order.status == 'awaiting_payment':
-        order.status = 'awaiting_address'
-        db.session.commit()
-        bot = telegram.Bot(token=order.bot.token)
-        run_async(bot.send_message(chat_id=order.chat_id, text="✅ Payment confirmed! Please reply with your full shipping address."))
-        execute_payout(order)
-    return "ok", 200
+    if not order or order.status != 'awaiting_payment':
+        # If order is not found or already processed, ignore the webhook
+        return "ok", 200
 
+    # --- 4. NEW: Handle Different Payment Statuses ---
+    if payment_status == 'finished':
+        # Get the actual amount paid from the webhook data
+        amount_paid = data.get('pay_amount')
+        expected_price = data.get('price_amount')
+        currency_paid = data.get('pay_currency')
+
+        # Save the payment details to the database
+        order.amount_paid = float(amount_paid)
+        order.payment_currency = currency_paid
+        
+        # Compare paid amount to expected price
+        if float(amount_paid) < float(expected_price):
+            order.status = 'underpaid'
+         # Notify the customer about the underpayment
+            underpaid_amount = float(expected_price) - float(amount_paid)
+            bot = telegram.Bot(token=order.bot.token)
+            message = (
+                f"⚠️ Payment Issue: Your order has been underpaid.\n\n"
+                f"Expected: {expected_price} {currency_paid.upper()}\n"
+                f"Received: {amount_paid} {currency_paid.upper()}\n\n"
+                f"Amount missing: {underpaid_amount:.8f} {currency_paid.upper()}"
+            )
+            run_async(bot.send_message(chat_id=order.chat_id, text=message))
+        
+        elif float(amount_paid) > float(expected_price):
+            order.status = 'overpaid'
+        else: # The payment is correct
+            order.status = 'awaiting_address'
+            # Trigger the bot to ask for shipping info
+            bot = telegram.Bot(token=order.bot.token)
+            run_async(bot.send_message(chat_id=order.chat_id, text="✅ Payment confirmed! Please reply with your full shipping address."))
+
+    elif payment_status in ['failed', 'refunded', 'expired']:
+        order.status = 'failed'
+
+    # --- 5. Save Changes to the Database ---
+    db.session.commit()
+    
+    # Payout logic can be added here in the future
+    # execute_payout(order)
+    
+    return "ok", 200
 # --- AUTHENTICATION ROUTES ---
 
 @api.route('/api/login', methods=['POST'])

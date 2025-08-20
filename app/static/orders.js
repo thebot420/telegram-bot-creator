@@ -16,7 +16,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`An error occurred: ${errorData.message}`);
             return null;
         }
-        // For DELETE requests or other actions that don't return JSON
         if (response.headers.get("content-length") === "0") {
             return true; 
         }
@@ -30,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const ordersListBody = document.getElementById('orders-list');
     const noOrdersMessage = document.getElementById('no-orders-message');
 
-    // Get the bot ID from the URL
     const pathParts = window.location.pathname.split('/');
     const botId = pathParts[pathParts.length - 1];
 
@@ -46,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Functions ---
+    // --- UPDATED RENDER FUNCTION ---
     function renderOrder(order) {
         const orderRow = document.createElement('tr');
         const orderDate = new Date(order.timestamp).toLocaleString();
@@ -54,10 +52,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const address = order.shipping_address || 'N/A';
         const note = order.customer_note || 'None';
 
+        // --- NEW: Status Cell Logic ---
+        let statusCellHtml = '';
+        const formattedStatus = order.status.replace('_', ' ');
+
+        if (order.status === 'underpaid' || order.status === 'overpaid') {
+            const discrepancy = Math.abs(order.amount_paid - order.price);
+            const currency = order.payment_currency ? order.payment_currency.toUpperCase() : 'USD';
+            
+            statusCellHtml = `
+                <span class="status-${order.status}" title="Expected: ${order.price.toFixed(2)} ${currency} | Paid: ${order.amount_paid.toFixed(8)} ${currency}">
+                    ${formattedStatus}
+                    <small>(${discrepancy.toFixed(8)} ${currency})</small>
+                </span>
+            `;
+        } else {
+            statusCellHtml = `<span class="status-${order.status}">${formattedStatus}</span>`;
+        }
+        // --- END of New Logic ---
+
         orderRow.innerHTML = `
             <td>${order.product_name}</td>
-            <td>£${order.price.toFixed(2)}</td>
-            <td><span class="status-${order.status}">${order.status.replace('_', ' ')}</span></td>
+            <td>$${order.price.toFixed(2)}</td>
+            <td>${statusCellHtml}</td>
             <td>${username}</td>
             <td>${address}</td>
             <td>${note}</td>
@@ -76,17 +93,17 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (order.status === 'dispatched') {
             actionsCell.textContent = '✅ Dispatched';
         }
+
         ordersListBody.appendChild(orderRow);
     }
 
-    // --- UPDATED API Call Functions ---
+    // --- API Call Functions ---
     async function markAsDispatched(orderId, buttonElement) {
         try {
             const response = await fetch(`/api/orders/${orderId}/dispatch`, {
                 method: 'POST'
             });
-            const success = await handleApiError(response); // <-- Use the helper
-
+            const success = await handleApiError(response);
             if (success) {
                 buttonElement.parentElement.textContent = '✅ Dispatched';
             }
@@ -100,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!botId) return;
         try {
             const response = await fetch(`/api/bots/${botId}/orders`);
-            const orders = await handleApiError(response); // <-- Use the helper
+            const orders = await handleApiError(response);
             
             if (orders) {
                 ordersListBody.innerHTML = '';

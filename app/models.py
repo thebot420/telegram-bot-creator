@@ -92,10 +92,11 @@ class PriceTier(db.Model):
     def to_dict(self):
         return {'id': self.id, 'label': self.label, 'price': self.price}
 
+
 class Order(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     product_name = db.Column(db.Text, nullable=False)
-    price = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False) # This is the expected price in your base currency (e.g., USD)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     status = db.Column(db.String(30), default='awaiting_payment', nullable=False)
     payout_status = db.Column(db.String(20), default='unpaid', nullable=False)
@@ -104,6 +105,10 @@ class Order(db.Model):
     telegram_username = db.Column(db.String(100), nullable=True)
     shipping_address = db.Column(db.Text, nullable=True)
     customer_note = db.Column(db.Text, nullable=True)
+
+    # --- NEW COLUMNS ---
+    payment_currency = db.Column(db.String(20), nullable=True) # e.g., 'btc', 'eth'
+    amount_paid = db.Column(db.Float, nullable=True)       # The actual amount of crypto paid
     
     def to_dict(self):
         return {
@@ -115,7 +120,10 @@ class Order(db.Model):
             'payout_status': self.payout_status,
             'telegram_username': self.telegram_username,
             'shipping_address': self.shipping_address,
-            'customer_note': self.customer_note
+            'customer_note': self.customer_note,
+            # --- NEW FIELDS for the API response ---
+            'payment_currency': self.payment_currency,
+            'amount_paid': self.amount_paid
         }
 
 class Cart(db.Model):
