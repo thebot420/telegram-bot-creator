@@ -81,8 +81,8 @@ def get_available_currencies():
         data = response.json()
         
         # --- THIS IS THE FIX ---
-        # Use the correct key 'available_for_payment' from the API response
-        available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('available_for_payment')]
+        # Explicitly check if the value is the boolean True.
+        available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('available_for_payment') is True]
 
         currency_cache['currencies'] = available_currencies
         currency_cache['last_updated'] = current_time
