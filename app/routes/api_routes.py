@@ -141,45 +141,50 @@ async def setup_bot_webhook(bot_token):
 def execute_payout(order):
     pass
 
+# --- This is the new, smarter send_cart_view function ---
 async def send_cart_view(bot, chat_id, message_id, bot_id):
     cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
     
-    # --- THIS IS THE FIX ---
-    # If the cart is empty, just send a new message instead of editing.
-    if not cart or not cart.items:
-        await bot.send_message(
-            chat_id=chat_id, 
-            text="Your shopping cart is empty.", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]])
-        )
-        return
-
-    # --- This part remains the same for when the cart is NOT empty ---
     cart_text = "🛒 **Your Shopping Cart**\n\n"
-    total_price = 0
-    keyboard = []
-    for item in cart.items:
-        item_total = item.quantity * item.price_tier.price
-        cart_text += f"- {item.quantity}x {item.price_tier.product.name} ({item.price_tier.label}) - £{item_total:.2f}\n"
-        total_price += item_total
-        keyboard.append([InlineKeyboardButton(f"❌ Remove {item.price_tier.label}", callback_data=f"remove_item:{item.id}")])
-    
-    cart_text += f"\n**Total: £{total_price:.2f}**"
-    keyboard.append([InlineKeyboardButton("🗑️ Clear Cart", callback_data=f"clear_cart:{cart.id}")])
-    keyboard.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
-    keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard_buttons = []
+
+    if not cart or not cart.items:
+        cart_text += "Your shopping cart is empty."
+        keyboard_buttons.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+    else:
+        total_price = 0
+        for item in cart.items:
+            item_total = item.quantity * item.price_tier.price
+            cart_text += f"- {item.quantity}x {item.price_tier.product.name} ({item.price_tier.label}) - £{item_total:.2f}\n"
+            total_price += item_total
+            keyboard_buttons.append([InlineKeyboardButton(f"❌ Remove {item.price_tier.label}", callback_data=f"remove_item:{item.id}")])
+        
+        cart_text += f"\n**Total: £{total_price:.2f}**"
+        keyboard_buttons.append([InlineKeyboardButton("🗑️ Clear Cart", callback_data=f"clear_cart:{cart.id}")])
+        keyboard_buttons.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
+        keyboard_buttons.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard_buttons)
     
     try:
-        # Try to edit the existing message first
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
+        # Always try to edit the message to create a smooth menu experience
+        await bot.edit_message_text(
+            chat_id=chat_id, 
+            message_id=message_id, 
+            text=cart_text, 
+            reply_markup=reply_markup, 
+            parse_mode='Markdown'
+        )
     except telegram.error.BadRequest as e:
-        # If editing fails (e.g., message is too old), send a new one
+        # If the message is not modified, that's okay. Just ignore the error.
         if 'message is not modified' in str(e):
-            pass # Ignore this specific error
+            pass
         else:
-            await bot.send_message(chat_id=chat_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
-# --- TELEGRAM & PAYMENT FUNCTIONS ---
+            # If it's a different error, we should log it.
+            logging.error(f"Error editing cart view: {e}")
+
+
+# --- This is the final, hardened handle_telegram_update function ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- RAW UPDATE RECEIVED: {update_data} ---")
     bot = telegram.Bot(token=bot_token)
@@ -188,7 +193,6 @@ async def handle_telegram_update(bot_token, update_data):
     with current_app.app_context():
         bot_data = Bot.query.filter_by(token=bot_token).first()
         if not bot_data or not bot_data.owner.is_active:
-            logging.warning("--- Update for inactive or non-existent bot. Aborting. ---")
             return
 
         if update.callback_query:
@@ -196,7 +200,14 @@ async def handle_telegram_update(bot_token, update_data):
             chat_id = query.message.chat_id
             message_id = query.message.message_id
             data = query.data
-            await query.answer()
+            
+            try:
+                await query.answer()
+            except telegram.error.BadRequest as e:
+                if "Query is too old" in str(e):
+                    logging.warning("--- Query was too old to answer. Continuing execution. ---")
+                else:
+                    raise e
 
             logging.info(f"--- CALLBACK QUERY RECEIVED: {data} ---")
             
@@ -284,7 +295,7 @@ async def handle_telegram_update(bot_token, update_data):
                         cart_item = CartItem(cart_id=cart.id, price_tier_id=price_tier.id, quantity=1)
                         db.session.add(cart_item)
                     db.session.commit()
-                    await bot.send_message(chat_id=chat_id, text=f"✅ '{price_tier.label}' for '{price_tier.product.name}' has been added to your cart.")
+                    await query.answer(text=f"✅ Added {price_tier.product.name} to cart!", show_alert=False)
 
             elif action == 'view_cart':
                 await send_cart_view(bot, chat_id, message_id, bot_data.id)
@@ -407,7 +418,6 @@ async def handle_telegram_update(bot_token, update_data):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await bot.send_message(chat_id=chat_id, text=bot_data.welcome_message, reply_markup=reply_markup)
-
 # --- WEBHOOK ROUTES (Publicly Accessible) ---
 
 @api.route('/webhook/<string:bot_token>', methods=['POST'])
