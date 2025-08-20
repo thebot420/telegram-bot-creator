@@ -126,7 +126,27 @@ def generate_currency_keyboard(page=1, cart_id=None):
     keyboard.append([InlineKeyboardButton("⬅️ Back to Cart", callback_data=f"view_cart:{cart_id}")])
 
     return InlineKeyboardMarkup(keyboard)
+async def send_cart_view(bot, chat_id, message_id, bot_id):
+    cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
+    if not cart or not cart.items:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Your shopping cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+        return
 
+    cart_text = "🛒 **Your Shopping Cart**\n\n"
+    total_price = 0
+    keyboard = []
+    for item in cart.items:
+        item_total = item.quantity * item.price_tier.price
+        cart_text += f"- {item.quantity}x {item.price_tier.product.name} ({item.price_tier.label}) - £{item_total:.2f}\n"
+        total_price += item_total
+        keyboard.append([InlineKeyboardButton(f"❌ Remove {item.price_tier.label}", callback_data=f"remove_item:{item.id}")])
+    
+    cart_text += f"\n**Total: £{total_price:.2f}**"
+    keyboard.append([InlineKeyboardButton("🗑️ Clear Cart", callback_data=f"clear_cart:{cart.id}")])
+    keyboard.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
 
 # --- TELEGRAM & PAYMENT FUNCTIONS ---
 async def handle_telegram_update(bot_token, update_data):
