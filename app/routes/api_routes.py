@@ -124,7 +124,25 @@ def generate_currency_keyboard(page=1, cart_id=None):
     
     keyboard.append(nav_row)
     keyboard.append([InlineKeyboardButton("⬅️ Back to Cart", callback_data=f"view_cart:{cart_id}")])
+# --- TELEGRAM & PAYMENT FUNCTIONS ---
 
+async def setup_bot_webhook(bot_token):
+    logging.info(f"Setting up webhook for token: {bot_token[:10]}... ---")
+    bot = telegram.Bot(token=bot_token)
+    webhook_url = f"{SERVER_URL}/webhook/{bot_token}"
+    
+    # This will now raise an exception if it fails, which our create_bot function can catch.
+    await bot.set_webhook(webhook_url)
+    
+    logging.info(f"--- SUCCESS: Webhook set for {bot_token[:10]}... ---")
+
+
+
+def execute_payout(order):
+    pass
+
+async def send_cart_view(bot, chat_id, message_id, bot_id):
+    # ... your existing code ...
     return InlineKeyboardMarkup(keyboard)
 async def send_cart_view(bot, chat_id, message_id, bot_id):
     cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
@@ -485,13 +503,58 @@ def admin_login():
 def create_bot():
     data = request.get_json()
     bot_token = data.get('bot_token')
+    
     if Bot.query.filter_by(token=bot_token).first():
         return jsonify({'message': 'A bot with this token already exists.'}), 409
+
+    # --- THIS IS THE NEW, SAFER LOGIC ---
+    
+    # 1. Create the bot object but DON'T save it permanently yet.
     new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
     db.session.add(new_bot)
-    db.session.commit()
-    run_async(setup_bot_webhook(bot_token))
-    return jsonify(new_bot.to_dict()), 201
+    
+    try:
+        # 2. Try to set up the webhook with Telegram.
+        # We need to get the result of the async function.
+        success = run_async(setup_bot_webhook(bot_token))
+        
+        # The setup_bot_webhook function needs to return True or False.
+        # Let's assume for now it will throw an exception on failure.
+        
+        # 3. If the webhook is successful, save everything.
+        db.session.commit()
+        logging.info(f"--- Successfully created and registered bot {new_bot.id} ---")
+        return jsonify(new_bot.to_dict()), 201
+
+    except Exception as e:
+        # 4. If the webhook fails, roll back the database change.
+        db.session.rollback()
+        logging.error(f"--- Webhook setup failed for token {bot_token[:10]}... Rolling back. Reason: {e} ---")
+        return jsonify({'message': 'Failed to create bot. The Telegram token is likely invalid or already in use by another bot.'}), 400
+    # --- THIS IS THE NEW, SAFER LOGIC ---
+    
+    # 1. Create the bot object but DON'T save it permanently yet.
+    new_bot = Bot(token=bot_token, wallet=data.get('wallet_address'), user_id=current_user.id)
+    db.session.add(new_bot)
+    
+    try:
+        # 2. Try to set up the webhook with Telegram.
+        # We need to get the result of the async function.
+        success = run_async(setup_bot_webhook(bot_token))
+        
+        # The setup_bot_webhook function needs to return True or False.
+        # Let's assume for now it will throw an exception on failure.
+        
+        # 3. If the webhook is successful, save everything.
+        db.session.commit()
+        logging.info(f"--- Successfully created and registered bot {new_bot.id} ---")
+        return jsonify(new_bot.to_dict()), 201
+
+    except Exception as e:
+        # 4. If the webhook fails, roll back the database change.
+        db.session.rollback()
+        logging.error(f"--- Webhook setup failed for token {bot_token[:10]}... Rolling back. Reason: {e} ---")
+        return jsonify({'message': 'Failed to create bot. The Telegram token is likely invalid or already in use by another bot.'}), 400
 
 @api.route('/api/users/<string:user_id>/bots', methods=['GET'])
 @login_required
