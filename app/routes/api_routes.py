@@ -142,14 +142,19 @@ def execute_payout(order):
     pass
 
 async def send_cart_view(bot, chat_id, message_id, bot_id):
-    # ... your existing code ...
-    return InlineKeyboardMarkup(keyboard)
-async def send_cart_view(bot, chat_id, message_id, bot_id):
     cart = Cart.query.filter_by(chat_id=str(chat_id), bot_id=bot_id).first()
+    
+    # --- THIS IS THE FIX ---
+    # If the cart is empty, just send a new message instead of editing.
     if not cart or not cart.items:
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Your shopping cart is empty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]))
+        await bot.send_message(
+            chat_id=chat_id, 
+            text="Your shopping cart is empty.", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]])
+        )
         return
 
+    # --- This part remains the same for when the cart is NOT empty ---
     cart_text = "🛒 **Your Shopping Cart**\n\n"
     total_price = 0
     keyboard = []
@@ -164,8 +169,16 @@ async def send_cart_view(bot, chat_id, message_id, bot_id):
     keyboard.append([InlineKeyboardButton("✅ Checkout", callback_data=f"checkout:{cart.id}")])
     keyboard.append([InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
-
+    
+    try:
+        # Try to edit the existing message first
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
+    except telegram.error.BadRequest as e:
+        # If editing fails (e.g., message is too old), send a new one
+        if 'message is not modified' in str(e):
+            pass # Ignore this specific error
+        else:
+            await bot.send_message(chat_id=chat_id, text=cart_text, reply_markup=reply_markup, parse_mode='Markdown')
 # --- TELEGRAM & PAYMENT FUNCTIONS ---
 async def handle_telegram_update(bot_token, update_data):
     logging.info(f"--- RAW UPDATE RECEIVED: {update_data} ---")
