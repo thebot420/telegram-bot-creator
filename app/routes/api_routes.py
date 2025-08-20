@@ -58,7 +58,7 @@ CACHE_DURATION = 3600 # Cache for 1 hour (3600 seconds)
 def get_available_currencies():
     """
     Fetches the list of available currencies from NOWPayments,
-    using a cache and enhanced logging for debugging.
+    using a cache to avoid excessive API calls.
     """
     global currency_cache
     current_time = time.time()
@@ -72,15 +72,17 @@ def get_available_currencies():
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
         response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
         
-        # --- THIS IS THE CRITICAL CHANGE ---
-        # We are forcing this to be an "error" log so it will definitely show up.
-        logging.error(f"--- NOWPayments RAW Response: {response.text} ---")
+        # Log the raw response for debugging if needed in the future
+        # logging.info(f"--- NOWPayments RAW Response: {response.text} ---")
         
         if not response.ok:
             response.raise_for_status()
 
         data = response.json()
-        available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('is_available')]
+        
+        # --- THIS IS THE FIX ---
+        # Use the correct key 'available_for_payment' from the API response
+        available_currencies = [c['code'] for c in data.get('currencies', []) if c.get('available_for_payment')]
 
         currency_cache['currencies'] = available_currencies
         currency_cache['last_updated'] = current_time
@@ -90,6 +92,7 @@ def get_available_currencies():
     except requests.exceptions.RequestException as e:
         logging.error(f"--- Failed to fetch currencies from NOWPayments (RequestException): {e} ---")
         return currency_cache['currencies'] if currency_cache['currencies'] else []
+
 def generate_currency_keyboard(page=1, cart_id=None):
     """
     Creates a paginated keyboard of available currencies.
