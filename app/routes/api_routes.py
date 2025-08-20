@@ -71,6 +71,14 @@ def get_available_currencies():
     try:
         headers = {'x-api-key': NOWPAYMENTS_API_KEY}
         response = requests.get('https://api.nowpayments.io/v1/full-currencies', headers=headers)
+        
+        # --- NEW: DETAILED LOGGING ---
+        if not response.ok:
+            logging.error(f"--- NOWPAYMENTS API ERROR ---")
+            logging.error(f"--- STATUS CODE: {response.status_code} ---")
+            logging.error(f"--- RESPONSE BODY: {response.text} ---")
+        # --- END OF NEW LOGGING ---
+
         response.raise_for_status()
         
         data = response.json()
@@ -81,9 +89,8 @@ def get_available_currencies():
         
         return available_currencies
     except requests.exceptions.RequestException as e:
-        logging.error(f"--- Failed to fetch currencies from NOWPayments: {e} ---")
+        logging.error(f"--- CRITICAL: Failed to connect to NOWPayments server: {e} ---")
         return currency_cache['currencies'] if currency_cache['currencies'] else []
-
 def generate_currency_keyboard(page=1, cart_id=None):
     """
     Creates a paginated keyboard of available currencies.
