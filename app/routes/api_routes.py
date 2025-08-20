@@ -167,7 +167,7 @@ async def send_cart_view(bot, chat_id, message_id, bot_id):
     reply_markup = InlineKeyboardMarkup(keyboard_buttons)
     
     try:
-        # Always try to edit the message to create a smooth menu experience
+        # First, try to edit the existing message for a smooth experience.
         await bot.edit_message_text(
             chat_id=chat_id, 
             message_id=message_id, 
@@ -175,6 +175,16 @@ async def send_cart_view(bot, chat_id, message_id, bot_id):
             reply_markup=reply_markup, 
             parse_mode='Markdown'
         )
+    except telegram.error.BadRequest:
+        # If editing fails (e.g., message is too old or unchanged),
+        # send a new message instead. This makes the bot more reliable.
+        await bot.send_message(
+            chat_id=chat_id,
+            text=cart_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
     except telegram.error.BadRequest as e:
         # If the message is not modified, that's okay. Just ignore the error.
         if 'message is not modified' in str(e):
